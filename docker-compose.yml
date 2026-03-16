@@ -1,0 +1,66 @@
+services:
+  api:
+    build: .
+    container_name: rag-api
+    ports:
+      - "8000:8000"
+    volumes:
+      - uploads_data:/app/data/uploads
+      - sqlite_data:/app/mcp_sqlite/databases
+    env_file:
+      - .env
+    environment:
+      - REDIS_HOST=redis
+      - CHROMA_HOST=chromadb
+      - CHROMA_PORT=8000
+      - USE_CHROMA_SERVER=true
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - MYSQL_HOST=host.docker.internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - redis
+      - chromadb
+    restart: unless-stopped
+    networks:
+      - rag-network
+
+  redis:
+    image: redis:latest
+    container_name: rag-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --save 60 1 --loglevel warning
+    restart: unless-stopped
+    networks:
+      - rag-network
+
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: rag-chromadb
+    ports:
+      - "8001:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+      - ANONYMIZED_TELEMETRY=FALSE
+    restart: unless-stopped
+    networks:
+      - rag-network
+
+volumes:
+  uploads_data:
+    driver: local
+  sqlite_data:
+    driver: local
+  redis_data:
+    driver: local
+  chroma_data:
+    driver: local
+
+networks:
+  rag-network:
+    driver: bridge

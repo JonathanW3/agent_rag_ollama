@@ -1,0 +1,41 @@
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.so
+.Python
+
+# Data persistence (managed by Docker volumes)
+redis_data/
+chroma_data/
+data/uploads/*
+data/chroma/*
+
+# SQLite databases (runtime data)
+mcp_sqlite/databases/agents/*.db
+mcp_sqlite/databases/system/*.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Tests and docs
+Test/
+Script Test/
+MD/
+*.md
+
+# Misc
+.env
+.claude/

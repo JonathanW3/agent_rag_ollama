@@ -1,0 +1,140 @@
+{
+  "_metadata": {
+    "description": "Configuración de categorías para modelos LLM",
+    "version": "1.0",
+    "last_updated": "2026-02-20T15:47:44.248145"
+  },
+  "categories": {
+    "💬 Chatbot / Conversacional": {
+      "description": "Modelos optimizados para conversación general y asistencia",
+      "models": [
+        "llama3:latest",
+        "llama3:8b",
+        "llama3.1:latest",
+        "qwen2.5:latest",
+        "qwen2.5:7b",
+        "qwen3:8b",
+        "mistral:latest",
+        "mistral:instruct",
+        "gemma:latest",
+        "gemma:7b",
+        "phi:latest",
+        "phi3:latest",
+        "vicuna:latest"
+      ],
+      "patterns": [
+        "llama3",
+        "llama-3",
+        "qwen3:",
+        "qwen2.5:",
+        "mistral",
+        "gemma",
+        "phi",
+        "vicuna"
+      ]
+    },
+    "💻 Desarrollo / Código": {
+      "description": "Modelos especializados en programación y desarrollo de software",
+      "models": [
+        "codellama:latest",
+        "codellama:7b",
+        "codellama:13b",
+        "starcoder:latest",
+        "starcoder2:latest",
+        "deepseek-coder:latest",
+        "deepseek-coder:6.7b",
+        "wizardcoder:latest"
+      ],
+      "patterns": [
+        "code",
+        "coder",
+        "starcoder",
+        "deepseek-coder",
+        "wizard"
+      ]
+    },
+    "🧠 Razonamiento / Análisis": {
+      "description": "Modelos con capacidades de razonamiento profundo y análisis complejo",
+      "models": [
+        "deepseek-r1:8b",
+        "deepseek-r1:latest",
+        "kimi-k2-thinking:cloud",
+        "llama4:16x17b"
+      ],
+      "patterns": [
+        "deepseek-r1",
+        "deepseek-r",
+        "kimi-k2-thinking",
+        "thinking",
+        "reasoning",
+        "o1"
+      ]
+    },
+    "🌍 Multilingüe": {
+      "description": "Modelos optimizados para múltiples idiomas",
+      "models": [
+        "aya:latest",
+        "aya:23b"
+      ],
+      "patterns": [
+        "aya",
+        "multilingual",
+        "xling",
+        "bloom"
+      ]
+    },
+    "📊 Embeddings": {
+      "description": "Modelos para generar embeddings y búsqueda semántica",
+      "models": [
+        "nomic-embed-text:latest",
+        "bge-large:latest",
+        "bge-base:latest",
+        "gte-large:latest",
+        "e5-large:latest"
+      ],
+      "patterns": [
+        "embed",
+        "nomic-embed",
+        "bge",
+        "gte",
+        "e5"
+      ]
+    },
+    "⚡ Rápidos / Ligeros": {
+      "description": "Modelos pequeños y rápidos para recursos limitados",
+      "models": [
+        "tinyllama:latest",
+        "phi:1b",
+        "gemma:2b"
+      ],
+      "patterns": [
+        "tinyllama",
+        "tiny",
+        "mini",
+        "small",
+        ":1b",
+        ":3b"
+      ]
+    },
+    "🎯 Especializados": {
+      "description": "Modelos para dominios específicos (médico, legal, visión, etc.)",
+      "models": [
+        "llava:latest",
+        "bakllava:latest"
+      ],
+      "patterns": [
+        "medical",
+        "llava",
+        "bakllava",
+        "law",
+        "finance",
+        "vision"
+      ]
+    },
+    "🔧 Otros": {
+      "description": "Modelos sin categoría específica",
+      "models": [],
+      "patterns": []
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cmd /c \"dir C:\\\\Farmacia_Dump 2>&1\")",
+      "Bash(cmd /c \"dir %USERPROFILE%\\\\Farmacia_Dump 2>&1\")",
+      "Bash(cmd /c \"dir C:\\\\Users\\\\usuarioIA\\\\Farmacia_Dump 2>&1\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''app/main.py'', encoding=''utf-8''\\).read\\(\\)\\); print\\(''OK: sin errores de sintaxis''\\)\")",
+      "Bash(npx tsc --noEmit)",
+      "Bash(py -c \"import ast; ast.parse\\(open\\(''app/main.py'', encoding=''utf-8''\\).read\\(\\)\\); print\\(''OK''\\)\")",
+      "Bash(py -c \"from cryptography.fernet import Fernet; print\\(Fernet.generate_key\\(\\).decode\\(\\)\\)\")",
+      "Bash(py -c \"import base64, os; print\\(base64.urlsafe_b64encode\\(os.urandom\\(32\\)\\).decode\\(\\)\\)\")",
+      "Bash(py -c \"import ast; ast.parse\\(open\\(''app/config.py'', encoding=''utf-8''\\).read\\(\\)\\); print\\(''OK''\\)\")",
+      "Bash(py -c \"import markdown; print\\(markdown.__version__\\)\")",
+      "Bash(.venv/Scripts/pip install markdown)",
+      "Bash(py -c \":*)",
+      "Bash(.venv/Scripts/python -c \":*)",
+      "Bash(npx tsc --noEmit --pretty)",
+      "Bash(pushd \"C:/Proyectos/front_config\")",
+      "Bash(.venv/Scripts/python.exe -c \"from app.main import app; print\\(f''OK - {len\\(app.routes\\)} routes loaded''\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \":*)",
+      "Bash(for d in mcp_sqlite mcp_email mcp_mysql)",
+      "Bash(do)",
+      "Bash(f=\"c:/Proyectos/rag_ollama_api/$d/__init__.py\")",
+      "Bash(if [ -f \"$f\" ])",
+      "Bash(then echo \"$d/__init__.py EXISTS\")",
+      "Bash(else echo \"$d/__init__.py MISSING\")",
+      "Bash(fi)",
+      "Bash(done)"
+    ]
+  }
+}
