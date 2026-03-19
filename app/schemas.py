@@ -16,6 +16,7 @@ class ChatRequest(BaseModel):
     use_sql: bool = Field(default=False, description="Permitir consultas a datos estructurados (SQLite) mediante MCP")
     use_mysql: bool | None = Field(default=None, description="Permitir consultas MySQL (None=usar config del agente)")
     use_email: bool | None = Field(default=None, description="Permitir envío de emails (None=usar config del agente)")
+    use_charts: bool | None = Field(default=None, description="Habilitar gráficos Plotly (None=usar config del agente)")
 
 
 class AgentCreate(BaseModel):
@@ -36,6 +37,7 @@ class AgentCreate(BaseModel):
     })
     use_mysql: bool = Field(default=False, description="Habilitar consultas MySQL (farmacia_db) por defecto para este agente")
     use_email: bool = Field(default=False, description="Habilitar envío de emails por defecto para este agente (requiere smtp_config)")
+    use_charts: bool = Field(default=False, description="Habilitar gráficos Plotly por defecto para este agente")
     top_k: int = Field(default=4, ge=1, le=100, description="Número de documentos RAG a recuperar por defecto")
     temperature: float = Field(default=0.7, ge=0.0, le=2.0, description="Temperatura del modelo por defecto")
 
@@ -51,6 +53,7 @@ class AgentUpdate(BaseModel):
     smtp_config: dict | None = Field(default=None, description="Configuración SMTP para envío de emails")
     use_mysql: bool | None = Field(default=None, description="Habilitar/deshabilitar MySQL para este agente")
     use_email: bool | None = Field(default=None, description="Habilitar/deshabilitar email para este agente")
+    use_charts: bool | None = Field(default=None, description="Habilitar/deshabilitar gráficos Plotly para este agente")
     top_k: int | None = Field(default=None, ge=1, le=100, description="Número de documentos RAG a recuperar por defecto")
     temperature: float | None = Field(default=None, ge=0.0, le=2.0, description="Temperatura del modelo por defecto")
 
@@ -117,6 +120,7 @@ class OrchestratorChatRequest(BaseModel):
     use_sql: bool = Field(default=False, description="Permitir consultas SQLite")
     use_mysql: bool | None = Field(default=None, description="Permitir consultas MySQL (None=usar config del agente)")
     use_email: bool | None = Field(default=None, description="Permitir envío de emails (None=usar config del agente)")
+    use_charts: bool | None = Field(default=None, description="Habilitar gráficos Plotly (None=usar config del agente)")
 
 
 class OrchestratorConfigRequest(BaseModel):

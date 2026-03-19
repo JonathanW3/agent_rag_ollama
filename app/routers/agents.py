@@ -36,6 +36,7 @@ def create_new_agent(req: AgentCreate):
             smtp_config=req.smtp_config,
             use_mysql=req.use_mysql,
             use_email=req.use_email,
+            use_charts=req.use_charts,
             top_k=req.top_k,
             temperature=req.temperature
         )
@@ -103,6 +104,7 @@ def update_agent_details(agent_id: str, req: AgentUpdate):
             smtp_config=req.smtp_config,
             use_mysql=req.use_mysql,
             use_email=req.use_email,
+            use_charts=req.use_charts,
             top_k=req.top_k,
             temperature=req.temperature
         )

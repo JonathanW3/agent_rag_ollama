@@ -9,6 +9,7 @@ from ..memory import save_message, get_history
 from ..ollama_client import ollama_chat
 from ..rag.retrieve import retrieve, build_context
 from ..utils.email_helpers import parse_email_actions, execute_email_actions
+from ..utils.chart_helpers import parse_chart_actions
 from mcp_sqlite.client import get_mcp_client
 from mcp_email.client import get_email_client
 from mcp_mysql.client import get_mysql_client
@@ -31,6 +32,8 @@ async def chat(req: ChatRequest):
     # El frontend puede deshabilitarlo explícitamente enviando use_email=false
     agent_default_email = agent.get("use_email", bool(agent.get("smtp_config")))
     eff_use_email = req.use_email if req.use_email is not None else agent_default_email
+    agent_default_charts = agent.get("use_charts", False)
+    eff_use_charts = req.use_charts if req.use_charts is not None else agent_default_charts
     eff_top_k = req.top_k if req.top_k is not None else agent.get("top_k", settings.TOP_K)
     eff_temperature = req.temperature if req.temperature is not None else agent.get("temperature", 0.7)
 
@@ -105,6 +108,134 @@ async def chat(req: ChatRequest):
             "--- FIN CAPACIDAD DE EMAIL ---"
         )
         messages[0]["content"] += email_instructions
+
+    # Inyectar capacidad de gráficos si está habilitado
+    if eff_use_charts:
+        chart_instructions = (
+            "\n\n--- CAPACIDAD DE GRAFICOS (OBLIGATORIO) ---\n"
+            "TIENES UN SISTEMA DE GRÁFICOS INTEGRADO. Cuando tu respuesta incluya datos numéricos, "
+            "comparaciones, rankings, distribuciones o tendencias, SIEMPRE DEBES incluir un bloque "
+            "[CHART_ACTION] al final de tu respuesta. El sistema renderiza automáticamente el gráfico "
+            "como una visualización interactiva profesional para el usuario. NO es opcional.\n\n"
+
+            "CUÁNDO GENERAR GRÁFICOS (SIEMPRE en estos casos):\n"
+            "- Cualquier respuesta que contenga datos numéricos en tablas\n"
+            "- Comparaciones entre sucursales, productos, periodos, etc.\n"
+            "- Rankings o tops (productos más vendidos, sucursales con más ventas, etc.)\n"
+            "- Distribuciones (por categoría, método de pago, tipo de cliente, etc.)\n"
+            "- Tendencias temporales (ventas mensuales, evolución de stock, etc.)\n"
+            "- Alertas de stock con cantidades por sucursal\n"
+            "- EN RESUMEN: si hay números, hay gráfico\n\n"
+
+            "CÓMO FUNCIONA:\n"
+            "1. Tú escribes tu análisis con datos reales + tabla markdown detallada\n"
+            "2. Al final incluyes el bloque [CHART_ACTION] con los MISMOS datos\n"
+            "3. El SISTEMA renderiza el gráfico interactivo automáticamente\n"
+            "4. El usuario VE tabla de datos + gráfico profesional juntos\n\n"
+
+            "FORMATO del bloque (JSON puro, sin markdown, sin texto extra):\n\n"
+            "[CHART_ACTION]\n"
+            '{"data": [...], "layout": {...}}\n'
+            "[/CHART_ACTION]\n\n"
+
+            "TIPOS DE GRÁFICO según el caso:\n"
+            '- Rankings/comparaciones → "type": "bar"\n'
+            '- Tendencias en el tiempo → "type": "line" (con markers)\n'
+            '- Distribuciones/proporciones → "type": "pie" (usar "labels" y "values")\n'
+            '- Barras agrupadas → múltiples trazas con "barmode": "group"\n'
+            '- Barras apiladas → múltiples trazas con "barmode": "stack"\n\n'
+
+            "ESTILO PROFESIONAL OBLIGATORIO:\n"
+            "Todos los gráficos DEBEN incluir estas propiedades de layout para verse profesionales:\n"
+            '{\n'
+            '  "layout": {\n'
+            '    "title": {"text": "Título Descriptivo", "font": {"size": 18, "color": "#1e293b", "family": "Arial Black"}},\n'
+            '    "paper_bgcolor": "#ffffff",\n'
+            '    "plot_bgcolor": "#f8fafc",\n'
+            '    "font": {"family": "Arial, sans-serif", "size": 12, "color": "#334155"},\n'
+            '    "xaxis": {"title": {"text": "Etiqueta X", "font": {"size": 13, "color": "#475569"}}, '
+            '"gridcolor": "#e2e8f0", "linecolor": "#cbd5e1", "tickfont": {"size": 11}},\n'
+            '    "yaxis": {"title": {"text": "Etiqueta Y", "font": {"size": 13, "color": "#475569"}}, '
+            '"gridcolor": "#e2e8f0", "linecolor": "#cbd5e1", "tickfont": {"size": 11}, "tickformat": ",.0f"},\n'
+            '    "legend": {"bgcolor": "rgba(255,255,255,0.8)", "bordercolor": "#e2e8f0", "borderwidth": 1, '
+            '"font": {"size": 11}},\n'
+            '    "margin": {"l": 80, "r": 40, "t": 60, "b": 80},\n'
+            '    "hoverlabel": {"bgcolor": "#1e293b", "font": {"color": "#ffffff", "size": 12}}\n'
+            '  }\n'
+            '}\n\n'
+
+            "PALETA DE COLORES CORPORATIVA (usar siempre):\n"
+            "- Colores principales: #2563eb (azul), #16a34a (verde), #dc2626 (rojo), #f59e0b (amarillo), "
+            "#7c3aed (violeta), #06b6d4 (cyan), #ea580c (naranja), #ec4899 (rosa)\n"
+            "- Para barras: usa 'marker': {'color': '#2563eb'} o array de colores para cada barra\n"
+            "- Para líneas: usa 'line': {'color': '#2563eb', 'width': 3} y 'marker': {'size': 8, 'color': '#2563eb'}\n"
+            "- Para pie: usa 'marker': {'colors': ['#2563eb', '#16a34a', '#dc2626', ...], "
+            "'line': {'color': '#ffffff', 'width': 2}}\n"
+            "- Para alertas: rojo (#dc2626) = SIN STOCK/crítico, amarillo (#f59e0b) = STOCK BAJO/advertencia, "
+            "verde (#16a34a) = OK/positivo\n\n"
+
+            "ENRIQUECIMIENTO DE DATOS:\n"
+            "- Incluye SIEMPRE la mayor cantidad de datos disponibles (mínimo 5-10 items si existen)\n"
+            "- Agrega 'text' en las trazas para mostrar valores sobre las barras/puntos: "
+            "'text': ['$4.2M', '$3.1M'], 'textposition': 'outside', 'textfont': {'size': 11, 'color': '#1e293b'}\n"
+            "- Para pie: usa 'textinfo': 'label+percent', 'hoverinfo': 'label+value+percent', 'hole': 0.4 (donut)\n"
+            "- Para líneas: usa 'mode': 'lines+markers+text' para mostrar puntos y valores\n"
+            "- Agrega 'hovertemplate' para tooltips informativos: "
+            "'hovertemplate': '<b>%{x}</b><br>Ventas: $%{y:,.0f}<extra></extra>'\n\n"
+
+            "ESTRUCTURA DE RESPUESTA OBLIGATORIA:\n"
+            "Tu respuesta SIEMPRE debe tener estas 3 partes en este orden:\n"
+            "1. ANÁLISIS EJECUTIVO: interpretación de los datos, hallazgos clave, recomendaciones\n"
+            "2. TABLA DE DATOS: tabla markdown completa y detallada con todos los datos relevantes "
+            "(posición, nombre, valor, %, variación, etc.)\n"
+            "3. GRÁFICO: bloque [CHART_ACTION] con los mismos datos de la tabla, estilo profesional\n\n"
+
+            "EJEMPLO COMPLETO:\n"
+            "---INICIO EJEMPLO---\n"
+            "## Análisis de Productos Más Vendidos\n\n"
+            "El Paracetamol lidera las ventas con $4.25M representando el 28.5% del total. "
+            "Los 5 productos principales concentran el 72% de las ventas.\n\n"
+            "| # | Producto | Laboratorio | Ventas | % Part. | Unidades |\n"
+            "|---|---------|------------|-------:|--------:|---------:|\n"
+            "| 1 | Paracetamol 500mg | Chile Lab | $4,250,000 | 28.5% | 8,500 |\n"
+            "| 2 | Ibuprofeno 400mg | Saval | $3,180,000 | 21.3% | 5,300 |\n"
+            "| 3 | Amoxicilina 500mg | Bagó | $2,890,000 | 19.4% | 2,890 |\n"
+            "| 4 | Omeprazol 20mg | Andrómaco | $2,450,000 | 16.4% | 4,900 |\n"
+            "| 5 | Losartán 50mg | Recalcine | $2,150,000 | 14.4% | 4,300 |\n\n"
+            "A continuación la gráfica:\n\n"
+            "[CHART_ACTION]\n"
+            '{"data": [{"type": "bar", "x": ["Paracetamol 500mg", "Ibuprofeno 400mg", "Amoxicilina 500mg", '
+            '"Omeprazol 20mg", "Losartán 50mg"], "y": [4250000, 3180000, 2890000, 2450000, 2150000], '
+            '"name": "Ventas ($)", "marker": {"color": ["#2563eb", "#16a34a", "#7c3aed", "#f59e0b", "#06b6d4"], '
+            '"line": {"color": "#ffffff", "width": 1}}, '
+            '"text": ["$4.25M", "$3.18M", "$2.89M", "$2.45M", "$2.15M"], '
+            '"textposition": "outside", "textfont": {"size": 11, "color": "#1e293b"}, '
+            '"hovertemplate": "<b>%{x}</b><br>Ventas: $%{y:,.0f}<extra></extra>"}], '
+            '"layout": {"title": {"text": "Top 5 Productos Más Vendidos", '
+            '"font": {"size": 18, "color": "#1e293b", "family": "Arial Black"}}, '
+            '"paper_bgcolor": "#ffffff", "plot_bgcolor": "#f8fafc", '
+            '"font": {"family": "Arial, sans-serif", "size": 12, "color": "#334155"}, '
+            '"xaxis": {"title": {"text": "Producto", "font": {"size": 13, "color": "#475569"}}, '
+            '"gridcolor": "#e2e8f0", "tickfont": {"size": 10}, "tickangle": -25}, '
+            '"yaxis": {"title": {"text": "Ventas ($)", "font": {"size": 13, "color": "#475569"}}, '
+            '"gridcolor": "#e2e8f0", "tickfont": {"size": 11}, "tickformat": "$,.0f"}, '
+            '"margin": {"l": 80, "r": 40, "t": 60, "b": 120}, '
+            '"hoverlabel": {"bgcolor": "#1e293b", "font": {"color": "#ffffff", "size": 12}}}}\n'
+            "[/CHART_ACTION]\n"
+            "---FIN EJEMPLO---\n\n"
+
+            "PROHIBICIONES ABSOLUTAS:\n"
+            "- NUNCA respondas con datos numéricos SIN incluir un [CHART_ACTION]. Si hay números, hay gráfico.\n"
+            "- NUNCA hagas gráficos sin estilo profesional. SIEMPRE incluye la paleta de colores, fuentes y formato.\n"
+            "- NUNCA menciones 'CHART_ACTION', 'Plotly', 'JSON', 'bloque' al usuario.\n"
+            "- NUNCA digas 'copia y pega', 'usa esta herramienta'. El gráfico aparece solo.\n"
+            "- NUNCA inventes datos. Usa SOLO datos reales de la base de datos.\n"
+            "- NUNCA generes un [CHART_ACTION] vacío o sin el campo 'data'.\n"
+            "- NUNCA hagas gráficos con menos de 5 datos si hay más disponibles. Muestra la mayor cantidad posible.\n"
+            "- PROHIBIDO generar bloques [RESULTADO DE GRAFICOS]. Esos los genera el SISTEMA.\n"
+            "--- FIN CAPACIDAD DE GRAFICOS ---"
+        )
+        messages[0]["content"] += chart_instructions
 
     # Agregar contexto SQL si está habilitado y es relevante
     if req.use_sql and mcp_client:
@@ -312,6 +443,20 @@ async def chat(req: ChatRequest):
             answer = cleaned_answer
     # ── END EMAIL POST-PROCESSING ──────────────────────────────────────────
 
+    # ── CHART POST-PROCESSING ─────────────────────────────────────────────
+    charts = []
+    if eff_use_charts:
+        # Limpiar bloques falsos de resultado generados por el LLM
+        fake_chart_pattern = r'\[RESULTADO DE GRAFICOS\].*?\[/RESULTADO DE GRAFICOS\]'
+        answer = re.sub(fake_chart_pattern, '', answer, flags=re.DOTALL).strip()
+
+        chart_actions, answer = parse_chart_actions(answer)
+        charts = [c for c in chart_actions if "_parse_error" not in c]
+        chart_errors = [c for c in chart_actions if "_parse_error" in c]
+        if chart_errors:
+            print(f"[CHART DEBUG] Errores de parsing: {chart_errors}")
+    # ── END CHART POST-PROCESSING ─────────────────────────────────────────
+
     # Construir resumen de emails para inyectar en el historial
     email_summary = ""
     if email_results:
@@ -325,11 +470,11 @@ async def chat(req: ChatRequest):
 
     # Guardar mensaje del usuario y respuesta limpia en Redis
     save_message(req.agent_id, req.session_id, "user", req.message)
-    # Guardar respuesta del asistente con el resumen de emails anexado
+    # Guardar respuesta del asistente con el resumen de emails y gráficos
     answer_to_save = answer
     if email_summary:
         answer_to_save = f"{answer}\n\n{email_summary}"
-    save_message(req.agent_id, req.session_id, "assistant", answer_to_save)
+    save_message(req.agent_id, req.session_id, "assistant", answer_to_save, charts=charts if charts else None)
 
     # Registrar la conversación en SQLite si está habilitado
     if req.use_sql and mcp_client:
@@ -345,6 +490,7 @@ async def chat(req: ChatRequest):
                     "sql_used": sql_context_used,
                     "email_sent": email_sent,
                     "email_count": len(email_results),
+                    "charts_count": len(charts),
                     "temperature": eff_temperature
                 },
                 success=True
@@ -379,4 +525,6 @@ async def chat(req: ChatRequest):
         "sql_results_count": len(sql_results),
         "email_sent": email_sent,
         "email_results": email_results,
+        "charts": charts,
+        "charts_count": len(charts),
     }

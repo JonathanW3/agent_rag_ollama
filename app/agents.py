@@ -30,7 +30,7 @@ def _decrypt_agent_smtp(agent: dict) -> dict:
     return agent
 
 
-def create_agent(name: str, prompt: str, description: str = "", agent_id: str = None, llm_model: str = None, sqlite_db_path: str = None, use_rag: bool = True, smtp_config: dict = None, use_mysql: bool = False, use_email: bool = False, top_k: int = 4, temperature: float = 0.7) -> dict:
+def create_agent(name: str, prompt: str, description: str = "", agent_id: str = None, llm_model: str = None, sqlite_db_path: str = None, use_rag: bool = True, smtp_config: dict = None, use_mysql: bool = False, use_email: bool = False, use_charts: bool = False, top_k: int = 4, temperature: float = 0.7) -> dict:
     """Crea un nuevo agente."""
     client = get_redis_client()
 
@@ -54,6 +54,7 @@ def create_agent(name: str, prompt: str, description: str = "", agent_id: str = 
         "smtp_config": smtp_config,
         "use_mysql": use_mysql,
         "use_email": use_email,
+        "use_charts": use_charts,
         "top_k": top_k,
         "temperature": temperature,
         "created_at": now,
@@ -92,7 +93,7 @@ def list_agents() -> list[dict]:
     agents.sort(key=lambda x: x.get("created_at", ""), reverse=True)
     return agents
 
-def update_agent(agent_id: str, name: str = None, prompt: str = None, description: str = None, llm_model: str = None, sqlite_db_path: str = None, use_rag: bool = None, smtp_config: dict = None, use_mysql: bool = None, use_email: bool = None, top_k: int = None, temperature: float = None) -> dict:
+def update_agent(agent_id: str, name: str = None, prompt: str = None, description: str = None, llm_model: str = None, sqlite_db_path: str = None, use_rag: bool = None, smtp_config: dict = None, use_mysql: bool = None, use_email: bool = None, use_charts: bool = None, top_k: int = None, temperature: float = None) -> dict:
     """Actualiza un agente existente."""
     client = get_redis_client()
     key = get_agent_key(agent_id)
@@ -121,6 +122,8 @@ def update_agent(agent_id: str, name: str = None, prompt: str = None, descriptio
         agent["use_mysql"] = use_mysql
     if use_email is not None:
         agent["use_email"] = use_email
+    if use_charts is not None:
+        agent["use_charts"] = use_charts
     if top_k is not None:
         agent["top_k"] = top_k
     if temperature is not None:

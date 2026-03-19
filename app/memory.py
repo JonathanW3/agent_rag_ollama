@@ -6,11 +6,17 @@ def get_session_key(agent_id: str, session_id: str) -> str:
     """Genera la clave de Redis para una sesión de un agente específico."""
     return f"chat_session:{agent_id}:{session_id}"
 
-def save_message(agent_id: str, session_id: str, role: str, content: str):
-    """Guarda un mensaje en el historial de la sesión."""
+def save_message(agent_id: str, session_id: str, role: str, content: str, charts: list[dict] = None):
+    """Guarda un mensaje en el historial de la sesión.
+
+    Args:
+        charts: Lista opcional de specs Plotly para persistir gráficos generados.
+    """
     client = get_redis_client()
     key = get_session_key(agent_id, session_id)
     message = {"role": role, "content": content}
+    if charts:
+        message["charts"] = charts
     client.rpush(key, json.dumps(message))
     client.expire(key, settings.SESSION_TTL)
 
