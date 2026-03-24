@@ -25,7 +25,31 @@
       "Bash(then echo \"$d/__init__.py EXISTS\")",
       "Bash(else echo \"$d/__init__.py MISSING\")",
       "Bash(fi)",
-      "Bash(done)"
+      "Bash(done)",
+      "Bash(python -c \"from app.utils.chart_helpers import parse_chart_actions; print\\(''OK''\\)\")",
+      "Bash(python -c \"from app.memory import save_message; print\\(''OK''\\)\")",
+      "Bash(python -c \":*)",
+      "Bash(nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(python -c \"from app.routers.supervisor import router; print\\(''OK -'', len\\(router.routes\\), ''rutas''\\)\")",
+      "Bash(python -c \"from app.main import app; routes = [r.path for r in app.routes if hasattr\\(r, ''path''\\) and ''supervisor'' in r.path]; print\\(''\\\\n''.join\\(sorted\\(routes\\)\\)\\)\")",
+      "Bash(curl -s -X POST http://localhost:8000/supervisor/feedback -H \"Content-Type: application/json\" -d '{\"\"agent_id\"\": \"\"default\"\", \"\"session_id\"\": \"\"default\"\", \"\"message_index\"\": 1, \"\"score\"\": 1}')",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''app/routers/supervisor.py''\\).read\\(\\)\\); print\\(''OK''\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''app/routers/supervisor.py'', encoding=''utf-8''\\).read\\(\\)\\); print\\(''OK''\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''app/schemas.py'', encoding=''utf-8''\\).read\\(\\)\\); print\\(''OK''\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''app/routers/supervisor.py''\\).read\\(\\)\\); print\\(''Syntax OK''\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''app/routers/supervisor.py'', encoding=''utf-8''\\).read\\(\\)\\); print\\(''Syntax OK''\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''app/ollama_client.py'', encoding=''utf-8''\\).read\\(\\)\\); print\\(''Syntax OK''\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''app/ollama_client.py''\\).read\\(\\)\\); print\\(''ollama_client.py OK''\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''app/routers/supervisor.py''\\).read\\(\\)\\); print\\(''supervisor.py OK''\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''app/routers/supervisor.py'', encoding=''utf-8''\\).read\\(\\)\\); print\\(''supervisor.py OK''\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''app/ollama_client.py'', encoding=''utf-8''\\).read\\(\\)\\); print\\(''ollama_client.py OK''\\)\")",
+      "Bash(python -c \"import py_compile; py_compile.compile\\(''app/routers/supervisor.py'', doraise=True\\)\")",
+      "Bash(python -c \"import py_compile; py_compile.compile\\(''app/schemas.py'', doraise=True\\)\")",
+      "Bash(find /c/Proyectos/rag_ollama_api -maxdepth 2 -type f \\\\\\(-name package.json -o -name vite.config.* -o -name next.config.* -o -name webpack.config.* -o -name tsconfig.json \\\\\\))",
+      "Bash(git log:*)"
     ]
   }
 }

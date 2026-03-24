@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
 from .agents import create_default_agent
 from .utils.json_sanitize import SanitizeJSONMiddleware
-from .routers import health, agents, chat, sessions, documents, chromadb, ollama, mcp_sqlite, mysql, email, orchestrator
+from .routers import health, agents, chat, sessions, documents, chromadb, ollama, mcp_sqlite, mysql, email, orchestrator, supervisor
 
 
 # Metadata para Swagger UI
@@ -56,6 +56,10 @@ tags_metadata = [
     {
         "name": "🎯 Orquestador",
         "description": "Router inteligente que analiza la consulta y la dirige al agente más adecuado de una lista configurable."
+    },
+    {
+        "name": "🔍 Supervisor",
+        "description": "Agente supervisor que evalúa la calidad de otros agentes, sugiere mejoras de prompts y gestiona aprobaciones humanas."
     },
     {
         "name": "⚙️ Sistema",
@@ -123,6 +127,7 @@ app.include_router(mcp_sqlite.router)
 app.include_router(mysql.router)
 app.include_router(email.router)
 app.include_router(orchestrator.router)
+app.include_router(supervisor.router)
 
 # Crear directorios necesarios
 os.makedirs(settings.UPLOAD_DIR, exist_ok=True)

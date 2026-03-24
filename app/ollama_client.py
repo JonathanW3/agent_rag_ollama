@@ -1,29 +1,37 @@
 import requests
 from .config import settings
 
-def ollama_chat(messages, temperature=0.2, model: str = None):
+def ollama_chat(messages, temperature=0.2, model: str = None, num_predict: int = None, timeout: int = None, format_json: bool = False):
     """Genera respuesta de chat usando Ollama.
-    
+
     Args:
         messages: Lista de mensajes en formato [{"role": "user", "content": "..."}]
         temperature: Temperatura del modelo (0.0-2.0)
         model: Nombre del modelo a usar. Si es None, usa settings.CHAT_MODEL
-    
+        num_predict: Máximo de tokens a generar. Si es None, usa el default de Ollama.
+        timeout: Timeout en segundos para la request HTTP. Default: 120s.
+        format_json: Si True, fuerza al modelo a generar JSON válido (Ollama format:"json").
+
     Returns:
         str: Respuesta generada por el modelo
     """
     # Usar modelo especificado o el modelo por defecto
     model_to_use = model if model is not None else settings.CHAT_MODEL
-    
+
     url = f"{settings.OLLAMA_BASE_URL}/api/chat"
+    options = {"temperature": temperature}
+    if num_predict is not None:
+        options["num_predict"] = num_predict
     payload = {
         "model": model_to_use,
         "messages": messages,
         "stream": False,
-        "options": {"temperature": temperature}
+        "options": options
     }
+    if format_json:
+        payload["format"] = "json"
     try:
-        r = requests.post(url, json=payload)
+        r = requests.post(url, json=payload, timeout=timeout or 120)
         r.raise_for_status()
         return r.json()["message"]["content"]
     except requests.exceptions.HTTPError as e:

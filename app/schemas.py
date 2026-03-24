@@ -133,3 +133,46 @@ class OrchestratorConfigRequest(BaseModel):
 class OrchestratorAddAgentsRequest(BaseModel):
     """Modelo para agregar agentes al orquestador."""
     agent_ids: list[str] = Field(..., description="IDs de agentes a agregar", example=["nuevo-agente"])
+
+
+class FeedbackRequest(BaseModel):
+    """Modelo para enviar feedback de un mensaje (thumbs up/down).
+
+    Ejemplo mínimo:
+    {"agent_id": "farmacia-bot", "session_id": "user123", "message_index": 1, "score": 1}
+    """
+    agent_id: str = Field(..., description="ID del agente", example="farmacia-bot")
+    session_id: str = Field(..., description="ID de la sesión", example="user123")
+    message_index: int = Field(..., ge=0, description="Índice del mensaje del asistente en el historial (0-based)", example=1)
+    score: int = Field(..., ge=-1, le=1, description="Puntuación: 1 (positivo) o -1 (negativo). No se permite 0.", example=1)
+
+
+class PromptProposalRequest(BaseModel):
+    """Modelo para aprobar o rechazar una propuesta de prompt."""
+    reason: str = Field(default="", description="Razón de la aprobación o rechazo")
+
+
+class SupervisorTestRequest(BaseModel):
+    """Modelo para configurar una prueba activa del supervisor contra un agente.
+
+    El supervisor genera preguntas de prueba, las ejecuta contra el agente
+    y evalúa las respuestas, uso de herramientas y adherencia al prompt.
+    """
+    num_turns: int = Field(default=5, ge=1, le=50, description="Número de preguntas de prueba a generar")
+    focus_areas: list[str] | None = Field(default=None, description="Áreas específicas a evaluar (ej: ['rag', 'charts', 'email', 'mysql', 'general']). Si es None, evalúa todas las capacidades del agente.")
+    custom_questions: list[str] | None = Field(default=None, description="Preguntas personalizadas adicionales para probar (se agregan a las generadas)")
+    temperature: float = Field(default=0.7, ge=0.0, le=2.0, description="Temperatura para las respuestas del agente durante el test")
+
+
+class SupervisorConfigUpdate(BaseModel):
+    """Modelo para actualizar la configuración del supervisor.
+
+    Todos los campos son opcionales. Solo se actualizan los que se envían.
+    Los system prompts controlan cómo el supervisor evalúa, genera preguntas y mejora prompts.
+    """
+    model: str | None = Field(default=None, description="Modelo LLM para el supervisor (None=usa el modelo global)", example="llama3.1")
+    prompt_evaluator: str | None = Field(default=None, description="System prompt para evaluar agentes (evaluación pasiva con historial)")
+    prompt_test_generator: str | None = Field(default=None, description="System prompt para generar preguntas de prueba")
+    prompt_turn_evaluator: str | None = Field(default=None, description="System prompt para evaluar cada turno individual")
+    prompt_summary_evaluator: str | None = Field(default=None, description="System prompt para generar el reporte final de síntesis")
+    prompt_engineer: str | None = Field(default=None, description="System prompt para generar mejoras de prompts de agentes")

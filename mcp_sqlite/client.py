@@ -218,6 +218,31 @@ class SQLiteMCPClient:
                 value TEXT NOT NULL,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
+            """,
+            # Tabla de feedback por mensaje (thumbs up/down)
+            """
+            CREATE TABLE IF NOT EXISTS message_feedback (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                session_id TEXT NOT NULL,
+                message_index INTEGER NOT NULL,
+                score INTEGER NOT NULL CHECK(score IN (-1, 1)),
+                user_message TEXT,
+                assistant_message TEXT,
+                UNIQUE(session_id, message_index)
+            )
+            """,
+            # Tabla de versiones de prompts
+            """
+            CREATE TABLE IF NOT EXISTS prompt_versions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                prompt TEXT NOT NULL,
+                version INTEGER NOT NULL,
+                change_reason TEXT,
+                approved_by TEXT DEFAULT 'system',
+                status TEXT DEFAULT 'active' CHECK(status IN ('active', 'replaced', 'rollback'))
+            )
             """
         ]
         
