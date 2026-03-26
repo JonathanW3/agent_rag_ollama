@@ -16,6 +16,9 @@ COPY app/ app/
 COPY mcp_sqlite/ mcp_sqlite/
 COPY mcp_email/ mcp_email/
 COPY mcp_mysql/ mcp_mysql/
+COPY mcp_mysql_ibm/ mcp_mysql_ibm/
+COPY mcp_mysql_autopart/ mcp_mysql_autopart/
+COPY mcp_google_calendar/ mcp_google_calendar/
 COPY data/ data/
 
 # Crear directorios necesarios
