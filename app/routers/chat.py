@@ -10,9 +10,13 @@ from ..ollama_client import ollama_chat
 from ..rag.retrieve import retrieve, build_context
 from ..utils.email_helpers import parse_email_actions, execute_email_actions
 from ..utils.chart_helpers import parse_chart_actions
+from ..utils.calendar_helpers import parse_calendar_actions, execute_calendar_actions
 from mcp_sqlite.client import get_mcp_client
 from mcp_email.client import get_email_client
 from mcp_mysql.client import get_mysql_client
+from mcp_mysql_ibm.client import get_ibm_client
+from mcp_mysql_autopart.client import get_autopart_client
+from mcp_google_calendar.client import get_calendar_client
 
 router = APIRouter(tags=["💬 Chat"])
 
@@ -34,6 +38,12 @@ async def chat(req: ChatRequest):
     eff_use_email = req.use_email if req.use_email is not None else agent_default_email
     agent_default_charts = agent.get("use_charts", False)
     eff_use_charts = req.use_charts if req.use_charts is not None else agent_default_charts
+    agent_default_calendar = agent.get("use_calendar", False)
+    eff_use_calendar = req.use_calendar if req.use_calendar is not None else agent_default_calendar
+    agent_default_ibm = agent.get("use_ibm", False)
+    eff_use_ibm = req.use_ibm if req.use_ibm is not None else agent_default_ibm
+    agent_default_autopart = agent.get("use_autopart", False)
+    eff_use_autopart = req.use_autopart if req.use_autopart is not None else agent_default_autopart
     eff_top_k = req.top_k if req.top_k is not None else agent.get("top_k", settings.TOP_K)
     eff_temperature = req.temperature if req.temperature is not None else agent.get("temperature", 0.7)
 
@@ -237,6 +247,120 @@ async def chat(req: ChatRequest):
         )
         messages[0]["content"] += chart_instructions
 
+    # Inyectar capacidad de Google Calendar si está habilitado
+    if eff_use_calendar:
+        calendar_instructions = (
+            "\n\n--- CAPACIDAD DE GOOGLE CALENDAR ---\n"
+            "Tienes la capacidad de gestionar eventos y reuniones en Google Calendar. "
+            "Puedes crear reuniones, listar eventos, verificar disponibilidad, actualizar y eliminar eventos.\n\n"
+
+            "CUÁNDO USAR ESTA CAPACIDAD:\n"
+            "- El usuario pide agendar/programar/crear una reunión o evento\n"
+            "- El usuario pregunta qué reuniones tiene hoy, mañana o en una fecha específica\n"
+            "- El usuario pide verificar si alguien está disponible en un horario\n"
+            "- El usuario pide cancelar, mover o modificar una reunión existente\n"
+            "- El usuario pide ver su agenda o calendario\n\n"
+
+            "CÓMO FUNCIONA:\n"
+            "Incluye un bloque [CALENDAR_ACTION] al final de tu respuesta con JSON válido puro.\n"
+            "El SISTEMA ejecuta la acción automáticamente y muestra el resultado al usuario.\n\n"
+
+            "FORMATO (JSON puro, sin markdown, sin texto extra):\n\n"
+            "[CALENDAR_ACTION]\n"
+            '{"action_type": "...", ...campos...}\n'
+            "[/CALENDAR_ACTION]\n\n"
+
+            "ACCIONES DISPONIBLES:\n\n"
+
+            "1. CREAR EVENTO/REUNIÓN:\n"
+            "[CALENDAR_ACTION]\n"
+            "{\n"
+            '  "action_type": "create_event",\n'
+            '  "summary": "Reunión de equipo",\n'
+            '  "start_datetime": "2026-03-26T10:00:00",\n'
+            '  "end_datetime": "2026-03-26T11:00:00",\n'
+            '  "description": "Revisión semanal del sprint",\n'
+            '  "location": "Sala de juntas",\n'
+            '  "attendees": ["juan@gmail.com", "maria@gmail.com"],\n'
+            '  "timezone": "America/Mexico_City",\n'
+            '  "add_meet": true,\n'
+            '  "calendar_id": "primary"\n'
+            "}\n"
+            "[/CALENDAR_ACTION]\n"
+            "Campos obligatorios: action_type, summary, start_datetime, end_datetime\n"
+            "Campos opcionales: description, location, attendees, timezone, add_meet, calendar_id\n\n"
+
+            "2. LISTAR EVENTOS (consultar agenda):\n"
+            "[CALENDAR_ACTION]\n"
+            "{\n"
+            '  "action_type": "list_events",\n'
+            '  "max_results": 10,\n'
+            '  "time_min": "2026-03-26T00:00:00-06:00",\n'
+            '  "time_max": "2026-03-26T23:59:59-06:00",\n'
+            '  "calendar_id": "primary"\n'
+            "}\n"
+            "[/CALENDAR_ACTION]\n"
+            "Campos obligatorios: action_type\n"
+            "Campos opcionales: max_results (default 10), time_min (default ahora), time_max, calendar_id\n"
+            "IMPORTANTE: Para consultar un día específico, usa time_min con las 00:00:00 y time_max con las 23:59:59 de ese día.\n\n"
+
+            "3. VERIFICAR DISPONIBILIDAD:\n"
+            "[CALENDAR_ACTION]\n"
+            "{\n"
+            '  "action_type": "check_availability",\n'
+            '  "emails": ["juan@gmail.com", "maria@gmail.com"],\n'
+            '  "time_min": "2026-03-26T09:00:00-06:00",\n'
+            '  "time_max": "2026-03-26T18:00:00-06:00",\n'
+            '  "timezone": "America/Mexico_City"\n'
+            "}\n"
+            "[/CALENDAR_ACTION]\n"
+            "Campos obligatorios: action_type, emails, time_min, time_max\n\n"
+
+            "4. ACTUALIZAR EVENTO:\n"
+            "[CALENDAR_ACTION]\n"
+            "{\n"
+            '  "action_type": "update_event",\n'
+            '  "event_id": "abc123",\n'
+            '  "summary": "Nuevo título",\n'
+            '  "start_datetime": "2026-03-26T14:00:00",\n'
+            '  "end_datetime": "2026-03-26T15:00:00"\n'
+            "}\n"
+            "[/CALENDAR_ACTION]\n"
+            "Campos obligatorios: action_type, event_id\n"
+            "Campos opcionales: summary, start_datetime, end_datetime, description, location, attendees\n\n"
+
+            "5. ELIMINAR EVENTO:\n"
+            "[CALENDAR_ACTION]\n"
+            "{\n"
+            '  "action_type": "delete_event",\n'
+            '  "event_id": "abc123"\n'
+            "}\n"
+            "[/CALENDAR_ACTION]\n"
+            "Campos obligatorios: action_type, event_id\n\n"
+
+            "REGLAS IMPORTANTES:\n"
+            "- SIEMPRE escribe tu respuesta al usuario PRIMERO, luego el bloque [CALENDAR_ACTION] al final\n"
+            "- Las fechas DEBEN estar en formato ISO 8601 (YYYY-MM-DDTHH:MM:SS)\n"
+            "- Si el usuario dice 'mañana a las 10', calcula la fecha correcta basándote en la fecha actual\n"
+            "- Si el usuario no especifica hora de fin, asume 1 hora de duración\n"
+            "- Si el usuario no especifica zona horaria, usa America/Mexico_City\n"
+            "- Para 'hoy' o 'mañana', genera time_min y time_max cubriendo el día completo (00:00 a 23:59)\n"
+            "- Puedes incluir múltiples bloques [CALENDAR_ACTION] para ejecutar varias acciones\n"
+            "- NO inventes event_ids; solo úsalos cuando el usuario te los proporcione o los hayas listado antes\n"
+            "- PROHIBIDO generar bloques [RESULTADO DE CALENDARIO]. Esos los genera el SISTEMA automáticamente\n"
+            "- NO digas 'La reunión ha sido creada'. Di 'Procesando la creación de la reunión...'\n"
+            "- Si necesitas listar eventos para responder una pregunta, usa list_events y el sistema mostrará los resultados\n\n"
+
+            "HISTORIAL DE CALENDARIO:\n"
+            "En el historial puedes encontrar bloques [RESULTADO DE CALENDARIO]...[/RESULTADO DE CALENDARIO] "
+            "generados por el SISTEMA. Usa esta información para:\n"
+            "  1. Informar al usuario sobre eventos creados, modificados o eliminados\n"
+            "  2. Referenciar event_ids de eventos previamente listados\n"
+            "  3. No duplicar eventos que ya fueron creados exitosamente\n"
+            "--- FIN CAPACIDAD DE GOOGLE CALENDAR ---"
+        )
+        messages[0]["content"] += calendar_instructions
+
     # Agregar contexto SQL si está habilitado y es relevante
     if req.use_sql and mcp_client:
         # Detectar si la pregunta requiere datos estructurados
@@ -378,6 +502,116 @@ async def chat(req: ChatRequest):
             except Exception as e:
                 print(f"Error consultando MySQL MCP: {e}")
 
+    # Agregar contexto IBM (ibm DB) si está habilitado
+    if eff_use_ibm:
+        ibm_keywords = [
+            "tarjeta", "crédito", "credit", "card", "banco", "emisor", "visa", "amex",
+            "mastercard", "límite", "titular", "transacción", "depósito", "retiro",
+            "balance", "bank", "empleado", "employee", "salario", "salary", "hire",
+            "attrition", "rotación", "deserción", "departamento", "overtime",
+            "satisfacción", "venta", "sales", "order", "revenue", "profit",
+            "región", "country", "producto", "channel", "ibm"
+        ]
+        message_lower = req.message.lower()
+        needs_ibm = any(kw in message_lower for kw in ibm_keywords)
+
+        if needs_ibm:
+            try:
+                ibm_client = get_ibm_client()
+                ibm_parts = []
+
+                # Resumen de tablas disponibles
+                tables = await ibm_client.list_tables()
+                if tables.get("success"):
+                    ibm_parts.append(
+                        f"Tablas disponibles en IBM:\n"
+                        f"{json.dumps(tables['tables'], indent=2, ensure_ascii=False)}"
+                    )
+
+                # Factores de attrition (resumen compacto y útil)
+                factores = await ibm_client.factores_attrition()
+                if factores.get("success") and factores.get("count", 0) > 0:
+                    ibm_parts.append(
+                        f"Factores de attrition (Yes vs No):\n"
+                        f"{json.dumps(factores['rows'], indent=2, ensure_ascii=False)}"
+                    )
+
+                # Resumen general de ventas
+                ventas = await ibm_client.resumen_ventas()
+                if ventas.get("success") and ventas.get("count", 0) > 0:
+                    ibm_parts.append(
+                        f"KPIs generales de ventas:\n"
+                        f"{json.dumps(ventas['rows'], indent=2, ensure_ascii=False)}"
+                    )
+
+                if ibm_parts:
+                    ibm_context = "\n\n".join(ibm_parts)
+                    messages.append({
+                        "role": "system",
+                        "content": (
+                            "Datos de la base de datos IBM (MySQL) disponibles para responder:\n"
+                            + ibm_context
+                        )
+                    })
+            except Exception as e:
+                print(f"Error consultando IBM MCP: {e}")
+
+    # Agregar contexto Autopart (autopart DB) si está habilitado
+    if eff_use_autopart:
+        autopart_keywords = [
+            "vehículo", "vehiculo", "vehicle", "auto", "carro", "coche", "modelo",
+            "fabricante", "manufacturer", "toyota", "honda", "bmw", "mercedes",
+            "ford", "chevrolet", "nissan", "hyundai", "kia", "volkswagen",
+            "categoría", "categoria", "category", "repuesto", "pieza", "parte",
+            "autoparte", "autopart", "vendedor", "seller", "precio", "price",
+            "publicación", "publicacion", "application", "compatibilidad",
+            "compatibility", "año", "anio", "year", "condición", "condicion",
+            "nuevo", "usado", "new", "used", "gel", "usd", "autopart"
+        ]
+        message_lower = req.message.lower()
+        needs_autopart = any(kw in message_lower for kw in autopart_keywords)
+
+        if needs_autopart:
+            try:
+                autopart_client = get_autopart_client()
+                autopart_parts = []
+
+                # Resumen de tablas disponibles
+                tables = await autopart_client.list_tables()
+                if tables.get("success"):
+                    autopart_parts.append(
+                        f"Tablas disponibles en Autopart:\n"
+                        f"{json.dumps(tables['tables'], indent=2, ensure_ascii=False)}"
+                    )
+
+                # Resumen de vehículos por fabricante
+                vehiculos = await autopart_client.resumen_vehiculos("fabricante", 10)
+                if vehiculos.get("success") and vehiculos.get("count", 0) > 0:
+                    autopart_parts.append(
+                        f"Vehículos por fabricante (top 10):\n"
+                        f"{json.dumps(vehiculos['rows'], indent=2, ensure_ascii=False)}"
+                    )
+
+                # Resumen de aplicaciones por estado
+                aplicaciones = await autopart_client.resumen_aplicaciones("estado", 10)
+                if aplicaciones.get("success") and aplicaciones.get("count", 0) > 0:
+                    autopart_parts.append(
+                        f"Publicaciones por estado:\n"
+                        f"{json.dumps(aplicaciones['rows'], indent=2, ensure_ascii=False)}"
+                    )
+
+                if autopart_parts:
+                    autopart_context = "\n\n".join(autopart_parts)
+                    messages.append({
+                        "role": "system",
+                        "content": (
+                            "Datos de la base de datos Autopart (MySQL) disponibles para responder:\n"
+                            + autopart_context
+                        )
+                    })
+            except Exception as e:
+                print(f"Error consultando Autopart MCP: {e}")
+
     # Agregar contexto RAG si está habilitado (verificar config del agente Y el parámetro de la request)
     agent_uses_rag = agent.get("use_rag", True)  # Por defecto True para retrocompatibilidad
     if eff_use_rag and agent_uses_rag:
@@ -457,6 +691,28 @@ async def chat(req: ChatRequest):
             print(f"[CHART DEBUG] Errores de parsing: {chart_errors}")
     # ── END CHART POST-PROCESSING ─────────────────────────────────────────
 
+    # ── CALENDAR POST-PROCESSING ────────────────────────────────────────
+    calendar_results = []
+    calendar_executed = False
+
+    if eff_use_calendar:
+        # Limpiar bloques falsos de resultado generados por el LLM
+        fake_calendar_pattern = r'\[RESULTADO DE CALENDARIO\].*?\[/RESULTADO DE CALENDARIO\]'
+        answer = re.sub(fake_calendar_pattern, '', answer, flags=re.DOTALL).strip()
+
+        calendar_actions, cleaned_answer = parse_calendar_actions(answer)
+        print(f"[CALENDAR DEBUG] Acciones parseadas: {len(calendar_actions)}")
+
+        if calendar_actions:
+            cal_client = get_calendar_client()
+            calendar_results = await execute_calendar_actions(
+                actions=calendar_actions,
+                calendar_client=cal_client,
+            )
+            calendar_executed = any(r.get("success") for r in calendar_results)
+            answer = cleaned_answer
+    # ── END CALENDAR POST-PROCESSING ────────────────────────────────────
+
     # Construir resumen de emails para inyectar en el historial
     email_summary = ""
     if email_results:
@@ -468,12 +724,44 @@ async def chat(req: ChatRequest):
                 lines.append(f"  - FALLÓ envío a {r.get('to', 'desconocido')} | Error: {r.get('error', 'desconocido')}")
         email_summary = "[RESULTADO DE EMAILS]\n" + "\n".join(lines) + "\n[/RESULTADO DE EMAILS]"
 
+    # Construir resumen de calendario para inyectar en el historial
+    calendar_summary = ""
+    if calendar_results:
+        lines = []
+        for r in calendar_results:
+            action_type = r.get("action_type", "unknown")
+            if r.get("success"):
+                if action_type == "create_event":
+                    meet_info = f" | Meet: {r['meet_link']}" if r.get("meet_link") else ""
+                    lines.append(f"  - CREADO: \"{r.get('summary')}\" | ID: {r.get('event_id')}{meet_info}")
+                elif action_type == "list_events":
+                    events = r.get("events", [])
+                    lines.append(f"  - LISTADO: {r.get('count', 0)} eventos encontrados")
+                    for ev in events:
+                        lines.append(f"    - [{ev.get('id')}] {ev.get('summary')} | {ev.get('start')} → {ev.get('end')}")
+                elif action_type == "update_event":
+                    lines.append(f"  - ACTUALIZADO: {r.get('event_id')} | {r.get('message')}")
+                elif action_type == "delete_event":
+                    lines.append(f"  - ELIMINADO: {r.get('event_id')}")
+                elif action_type == "check_availability":
+                    avail = r.get("availability", {})
+                    status = "Todos disponibles" if r.get("all_available") else "Hay conflictos"
+                    lines.append(f"  - DISPONIBILIDAD: {status}")
+                    for email_addr, info in avail.items():
+                        emoji = "libre" if info.get("is_available") else "ocupado"
+                        lines.append(f"    - {email_addr}: {emoji}")
+            else:
+                lines.append(f"  - FALLÓ {action_type}: {r.get('error', 'desconocido')}")
+        calendar_summary = "[RESULTADO DE CALENDARIO]\n" + "\n".join(lines) + "\n[/RESULTADO DE CALENDARIO]"
+
     # Guardar mensaje del usuario y respuesta limpia en Redis
     save_message(req.agent_id, req.session_id, "user", req.message)
-    # Guardar respuesta del asistente con el resumen de emails y gráficos
+    # Guardar respuesta del asistente con el resumen de emails, gráficos y calendario
     answer_to_save = answer
     if email_summary:
-        answer_to_save = f"{answer}\n\n{email_summary}"
+        answer_to_save = f"{answer_to_save}\n\n{email_summary}"
+    if calendar_summary:
+        answer_to_save = f"{answer_to_save}\n\n{calendar_summary}"
     save_message(req.agent_id, req.session_id, "assistant", answer_to_save, charts=charts if charts else None)
 
     # Registrar la conversación en SQLite si está habilitado
@@ -491,6 +779,8 @@ async def chat(req: ChatRequest):
                     "email_sent": email_sent,
                     "email_count": len(email_results),
                     "charts_count": len(charts),
+                    "calendar_executed": calendar_executed,
+                    "calendar_actions_count": len(calendar_results),
                     "temperature": eff_temperature
                 },
                 success=True
@@ -527,4 +817,6 @@ async def chat(req: ChatRequest):
         "email_results": email_results,
         "charts": charts,
         "charts_count": len(charts),
+        "calendar_executed": calendar_executed,
+        "calendar_results": calendar_results,
     }

@@ -1,7 +1,8 @@
 from fastapi import APIRouter, HTTPException, Query
 from ..schemas import AgentCreate, AgentUpdate
 from ..agents import (
-    create_agent, get_agent, list_agents, update_agent, delete_agent, get_agent_stats
+    create_agent, get_agent, list_agents, update_agent, delete_agent, get_agent_stats,
+    list_organizations
 )
 from ..ollama_client import ollama_model_exists
 from ..rag.store import delete_agent_collection
@@ -30,6 +31,7 @@ def create_new_agent(req: AgentCreate):
             prompt=req.prompt,
             description=req.description,
             agent_id=req.agent_id,
+            organization=req.organization,
             llm_model=model_to_use,
             sqlite_db_path=req.sqlite_db_path,
             use_rag=req.use_rag,
@@ -37,6 +39,8 @@ def create_new_agent(req: AgentCreate):
             use_mysql=req.use_mysql,
             use_email=req.use_email,
             use_charts=req.use_charts,
+            use_ibm=req.use_ibm,
+            use_autopart=req.use_autopart,
             top_k=req.top_k,
             temperature=req.temperature
         )
@@ -45,19 +49,38 @@ def create_new_agent(req: AgentCreate):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.get("", summary="Listar todos los agentes")
-def get_agents():
-    """Lista todos los agentes disponibles con su información básica."""
+@router.get("", summary="Listar agentes")
+def get_agents(
+    organization: str = Query(default=None, description="Filtrar por organización (opcional)")
+):
+    """Lista agentes. Si se pasa ?organization=IBM, retorna solo los de esa organización."""
     try:
-        agents = list_agents()
+        agents = list_agents(organization=organization)
         return {
             "agents": agents,
-            "count": len(agents)
+            "count": len(agents),
+            "organization": organization
         }
     except Exception as e:
         raise HTTPException(
             status_code=500,
             detail=f"Error listando agentes: {str(e)}"
+        )
+
+
+@router.get("/organizations", summary="Listar organizaciones")
+def get_organizations():
+    """Lista todas las organizaciones que tienen agentes registrados."""
+    try:
+        orgs = list_organizations()
+        return {
+            "organizations": orgs,
+            "count": len(orgs)
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error listando organizaciones: {str(e)}"
         )
 
 
@@ -98,6 +121,7 @@ def update_agent_details(agent_id: str, req: AgentUpdate):
             name=req.name,
             prompt=req.prompt,
             description=req.description,
+            organization=req.organization,
             llm_model=model_to_use,
             sqlite_db_path=req.sqlite_db_path,
             use_rag=req.use_rag,
@@ -105,6 +129,8 @@ def update_agent_details(agent_id: str, req: AgentUpdate):
             use_mysql=req.use_mysql,
             use_email=req.use_email,
             use_charts=req.use_charts,
+            use_ibm=req.use_ibm,
+            use_autopart=req.use_autopart,
             top_k=req.top_k,
             temperature=req.temperature
         )

@@ -58,6 +58,9 @@ async def orchestrator_chat(req: OrchestratorChatRequest):
         use_mysql=req.use_mysql,
         use_email=req.use_email,
         use_charts=req.use_charts,
+        use_calendar=req.use_calendar,
+        use_ibm=req.use_ibm,
+        use_autopart=req.use_autopart,
     )
 
     result = await execute_chat(chat_req)

@@ -30,7 +30,7 @@ def _decrypt_agent_smtp(agent: dict) -> dict:
     return agent
 
 
-def create_agent(name: str, prompt: str, description: str = "", agent_id: str = None, llm_model: str = None, sqlite_db_path: str = None, use_rag: bool = True, smtp_config: dict = None, use_mysql: bool = False, use_email: bool = False, use_charts: bool = False, top_k: int = 4, temperature: float = 0.7) -> dict:
+def create_agent(name: str, prompt: str, description: str = "", agent_id: str = None, organization: str = None, llm_model: str = None, sqlite_db_path: str = None, use_rag: bool = True, smtp_config: dict = None, use_mysql: bool = False, use_email: bool = False, use_charts: bool = False, use_ibm: bool = False, use_autopart: bool = False, top_k: int = 4, temperature: float = 0.7) -> dict:
     """Crea un nuevo agente."""
     client = get_redis_client()
 
@@ -48,6 +48,7 @@ def create_agent(name: str, prompt: str, description: str = "", agent_id: str = 
         "name": name,
         "prompt": prompt,
         "description": description,
+        "organization": organization,
         "llm_model": llm_model,
         "sqlite_db_path": sqlite_db_path,
         "use_rag": use_rag,
@@ -55,6 +56,8 @@ def create_agent(name: str, prompt: str, description: str = "", agent_id: str = 
         "use_mysql": use_mysql,
         "use_email": use_email,
         "use_charts": use_charts,
+        "use_ibm": use_ibm,
+        "use_autopart": use_autopart,
         "top_k": top_k,
         "temperature": temperature,
         "created_at": now,
@@ -78,8 +81,8 @@ def get_agent(agent_id: str) -> dict | None:
     agent = json.loads(data)
     return _decrypt_agent_smtp(agent)
 
-def list_agents() -> list[dict]:
-    """Lista todos los agentes."""
+def list_agents(organization: str = None) -> list[dict]:
+    """Lista agentes. Si se pasa organization, filtra por esa organización."""
     client = get_redis_client()
 
     agents = []
@@ -87,13 +90,37 @@ def list_agents() -> list[dict]:
         data = client.get(key)
         if data:
             agent = json.loads(data)
-            agents.append(_decrypt_agent_smtp(agent))
+            agent = _decrypt_agent_smtp(agent)
+            if organization is not None:
+                if agent.get("organization", "").lower() == organization.lower():
+                    agents.append(agent)
+            else:
+                agents.append(agent)
 
     # Ordenar por fecha de creación
     agents.sort(key=lambda x: x.get("created_at", ""), reverse=True)
     return agents
 
-def update_agent(agent_id: str, name: str = None, prompt: str = None, description: str = None, llm_model: str = None, sqlite_db_path: str = None, use_rag: bool = None, smtp_config: dict = None, use_mysql: bool = None, use_email: bool = None, use_charts: bool = None, top_k: int = None, temperature: float = None) -> dict:
+
+def list_organizations() -> list[dict]:
+    """Lista todas las organizaciones con su conteo de agentes."""
+    client = get_redis_client()
+
+    org_counts: dict[str, int] = {}
+    for key in client.scan_iter("agent:*"):
+        data = client.get(key)
+        if data:
+            agent = json.loads(data)
+            org = agent.get("organization")
+            if org:
+                org_counts[org] = org_counts.get(org, 0) + 1
+
+    return [
+        {"name": name, "agent_count": count}
+        for name, count in sorted(org_counts.items())
+    ]
+
+def update_agent(agent_id: str, name: str = None, prompt: str = None, description: str = None, organization: str = None, llm_model: str = None, sqlite_db_path: str = None, use_rag: bool = None, smtp_config: dict = None, use_mysql: bool = None, use_email: bool = None, use_charts: bool = None, use_ibm: bool = None, use_autopart: bool = None, top_k: int = None, temperature: float = None) -> dict:
     """Actualiza un agente existente."""
     client = get_redis_client()
     key = get_agent_key(agent_id)
@@ -110,6 +137,8 @@ def update_agent(agent_id: str, name: str = None, prompt: str = None, descriptio
         agent["prompt"] = prompt
     if description is not None:
         agent["description"] = description
+    if organization is not None:
+        agent["organization"] = organization
     if llm_model is not None:
         agent["llm_model"] = llm_model
     if sqlite_db_path is not None:
@@ -124,6 +153,10 @@ def update_agent(agent_id: str, name: str = None, prompt: str = None, descriptio
         agent["use_email"] = use_email
     if use_charts is not None:
         agent["use_charts"] = use_charts
+    if use_ibm is not None:
+        agent["use_ibm"] = use_ibm
+    if use_autopart is not None:
+        agent["use_autopart"] = use_autopart
     if top_k is not None:
         agent["top_k"] = top_k
     if temperature is not None:

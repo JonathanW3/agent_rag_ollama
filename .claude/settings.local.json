@@ -49,7 +49,18 @@
       "Bash(python -c \"import py_compile; py_compile.compile\\(''app/routers/supervisor.py'', doraise=True\\)\")",
       "Bash(python -c \"import py_compile; py_compile.compile\\(''app/schemas.py'', doraise=True\\)\")",
       "Bash(find /c/Proyectos/rag_ollama_api -maxdepth 2 -type f \\\\\\(-name package.json -o -name vite.config.* -o -name next.config.* -o -name webpack.config.* -o -name tsconfig.json \\\\\\))",
-      "Bash(git log:*)"
+      "Bash(git log:*)",
+      "Bash(find /c/Proyectos/rag_ollama_api -not -path */.venv/* -not -path */.git/* -type d)",
+      "Bash(find /c/Proyectos/rag_ollama_api/mcp_* -type f -name \"*.py\")",
+      "Bash(ls -la /c/Proyectos/rag_ollama_api/mcp_* -R)",
+      "Bash(python -c \"from app.routers.chat import router; print\\(''chat.py OK''\\)\")",
+      "Bash(python -c \"from mcp_google_calendar import GoogleCalendarMCPServer, GoogleCalendarMCPClient; print\\(''MCP Google Calendar OK''\\)\")",
+      "Bash(python -c \"from app.utils.calendar_helpers import parse_calendar_actions, execute_calendar_actions; print\\(''calendar_helpers OK''\\)\")",
+      "Bash(grep -r \"SQLAlchemy\\\\|sqlalchemy\\\\|ORM\\\\|declarative_base\" /c/Proyectos/rag_ollama_api/app --include=*.py)",
+      "Bash(grep -r \"get_mysql_client\\\\|get_mcp_client\\\\|get_calendar_client\" /c/Proyectos/rag_ollama_api --include=*.py)",
+      "Bash(python -c \"from mcp_mysql_autopart.server import AutopartMCPServer; from mcp_mysql_autopart.client import get_autopart_client; print\\(''OK: mcp_mysql_autopart imports''\\)\")",
+      "Bash(python -c \"from app.schemas import AutopartQueryRequest, ChatRequest; print\\(''OK: schemas''\\); from app.routers.autopart import router; print\\(''OK: autopart router''\\)\")",
+      "Bash(python -c \"from app.agents import create_agent, update_agent; import inspect; sig = inspect.signature\\(create_agent\\); print\\(''use_autopart'' in sig.parameters\\); sig2 = inspect.signature\\(update_agent\\); print\\(''use_autopart'' in sig2.parameters\\)\")"
     ]
   }
 }

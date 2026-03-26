@@ -17,6 +17,9 @@ class ChatRequest(BaseModel):
     use_mysql: bool | None = Field(default=None, description="Permitir consultas MySQL (None=usar config del agente)")
     use_email: bool | None = Field(default=None, description="Permitir envío de emails (None=usar config del agente)")
     use_charts: bool | None = Field(default=None, description="Habilitar gráficos Plotly (None=usar config del agente)")
+    use_calendar: bool | None = Field(default=None, description="Habilitar Google Calendar (None=usar config del agente)")
+    use_ibm: bool | None = Field(default=None, description="Habilitar consultas MySQL IBM (None=usar config del agente)")
+    use_autopart: bool | None = Field(default=None, description="Habilitar consultas MySQL Autopart (None=usar config del agente)")
 
 
 class AgentCreate(BaseModel):
@@ -25,6 +28,7 @@ class AgentCreate(BaseModel):
     prompt: str = Field(..., description="Prompt del sistema que define la personalidad y expertise del agente", example="Eres un experto en Python con 10 años de experiencia...")
     description: str = Field(default="", description="Descripción breve del agente", example="Especialista en desarrollo Python")
     agent_id: str | None = Field(default=None, description="ID personalizado (opcional, se genera automáticamente si se omite)", example="python-expert")
+    organization: str | None = Field(default=None, description="Organización a la que pertenece el agente. Permite agrupar agentes por empresa/equipo.", example="IBM")
     llm_model: str | None = Field(default=None, description="Modelo LLM específico para este agente (opcional, usa el modelo global si se omite)", example="codellama")
     sqlite_db_path: str | None = Field(default=None, description="Ruta a base de datos SQLite personalizada (ej: 'Monitoring.db', './data/custom.db')", example="Monitoring.db")
     use_rag: bool = Field(default=True, description="Habilitar RAG/ChromaDB para este agente. Si es False, el agente no usará búsqueda vectorial.", example=True)
@@ -38,6 +42,9 @@ class AgentCreate(BaseModel):
     use_mysql: bool = Field(default=False, description="Habilitar consultas MySQL (farmacia_db) por defecto para este agente")
     use_email: bool = Field(default=False, description="Habilitar envío de emails por defecto para este agente (requiere smtp_config)")
     use_charts: bool = Field(default=False, description="Habilitar gráficos Plotly por defecto para este agente")
+    use_calendar: bool = Field(default=False, description="Habilitar Google Calendar por defecto para este agente")
+    use_ibm: bool = Field(default=False, description="Habilitar consultas MySQL IBM (credit_cards, employees, sales_orders, etc.) por defecto")
+    use_autopart: bool = Field(default=False, description="Habilitar consultas MySQL Autopart (vehicles, applications, compatibility, etc.) por defecto")
     top_k: int = Field(default=4, ge=1, le=100, description="Número de documentos RAG a recuperar por defecto")
     temperature: float = Field(default=0.7, ge=0.0, le=2.0, description="Temperatura del modelo por defecto")
 
@@ -47,6 +54,7 @@ class AgentUpdate(BaseModel):
     name: str | None = Field(default=None, description="Nuevo nombre del agente")
     prompt: str | None = Field(default=None, description="Nuevo prompt del sistema")
     description: str | None = Field(default=None, description="Nueva descripción")
+    organization: str | None = Field(default=None, description="Organización a la que pertenece el agente")
     llm_model: str | None = Field(default=None, description="Nuevo modelo LLM (usa None para mantener el actual, '' para usar el global)")
     sqlite_db_path: str | None = Field(default=None, description="Ruta a base de datos SQLite personalizada (ej: 'Monitoring.db')")
     use_rag: bool | None = Field(default=None, description="Habilitar/deshabilitar RAG para este agente")
@@ -54,6 +62,9 @@ class AgentUpdate(BaseModel):
     use_mysql: bool | None = Field(default=None, description="Habilitar/deshabilitar MySQL para este agente")
     use_email: bool | None = Field(default=None, description="Habilitar/deshabilitar email para este agente")
     use_charts: bool | None = Field(default=None, description="Habilitar/deshabilitar gráficos Plotly para este agente")
+    use_calendar: bool | None = Field(default=None, description="Habilitar/deshabilitar Google Calendar para este agente")
+    use_ibm: bool | None = Field(default=None, description="Habilitar/deshabilitar MySQL IBM para este agente")
+    use_autopart: bool | None = Field(default=None, description="Habilitar/deshabilitar MySQL Autopart para este agente")
     top_k: int | None = Field(default=None, ge=1, le=100, description="Número de documentos RAG a recuperar por defecto")
     temperature: float | None = Field(default=None, ge=0.0, le=2.0, description="Temperatura del modelo por defecto")
 
@@ -108,6 +119,18 @@ class MySQLQueryRequest(BaseModel):
     params: list = Field(default=[], description="Parámetros para placeholders %s")
 
 
+class IBMQueryRequest(BaseModel):
+    """Modelo para consultas a la base de datos IBM."""
+    query: str = Field(..., description="Consulta SELECT a ejecutar", example="SELECT * FROM credit_cards LIMIT 5")
+    params: list = Field(default=[], description="Parámetros para placeholders %s")
+
+
+class AutopartQueryRequest(BaseModel):
+    """Modelo para consultas a la base de datos Autopart."""
+    query: str = Field(..., description="Consulta SELECT a ejecutar", example="SELECT * FROM vehicles LIMIT 5")
+    params: list = Field(default=[], description="Parámetros para placeholders %s")
+
+
 class OrchestratorChatRequest(BaseModel):
     """Modelo para solicitudes al orquestador inteligente.
 
@@ -121,6 +144,9 @@ class OrchestratorChatRequest(BaseModel):
     use_mysql: bool | None = Field(default=None, description="Permitir consultas MySQL (None=usar config del agente)")
     use_email: bool | None = Field(default=None, description="Permitir envío de emails (None=usar config del agente)")
     use_charts: bool | None = Field(default=None, description="Habilitar gráficos Plotly (None=usar config del agente)")
+    use_calendar: bool | None = Field(default=None, description="Habilitar Google Calendar (None=usar config del agente)")
+    use_ibm: bool | None = Field(default=None, description="Habilitar MySQL IBM (None=usar config del agente)")
+    use_autopart: bool | None = Field(default=None, description="Habilitar MySQL Autopart (None=usar config del agente)")
 
 
 class OrchestratorConfigRequest(BaseModel):
@@ -162,6 +188,40 @@ class SupervisorTestRequest(BaseModel):
     focus_areas: list[str] | None = Field(default=None, description="Áreas específicas a evaluar (ej: ['rag', 'charts', 'email', 'mysql', 'general']). Si es None, evalúa todas las capacidades del agente.")
     custom_questions: list[str] | None = Field(default=None, description="Preguntas personalizadas adicionales para probar (se agregan a las generadas)")
     temperature: float = Field(default=0.7, ge=0.0, le=2.0, description="Temperatura para las respuestas del agente durante el test")
+
+
+class CalendarEventCreateRequest(BaseModel):
+    """Modelo para crear un evento/reunión en Google Calendar."""
+    summary: str = Field(..., description="Título del evento/reunión", example="Reunión de equipo")
+    start_datetime: str = Field(..., description="Fecha y hora de inicio ISO 8601", example="2026-03-26T10:00:00")
+    end_datetime: str = Field(..., description="Fecha y hora de fin ISO 8601", example="2026-03-26T11:00:00")
+    description: str = Field(default="", description="Descripción del evento", example="Revisión semanal del sprint")
+    location: str = Field(default="", description="Ubicación del evento", example="Sala de juntas")
+    attendees: list[str] | None = Field(default=None, description="Emails de participantes", example=["usuario@gmail.com"])
+    timezone: str = Field(default="America/Mexico_City", description="Zona horaria")
+    add_meet: bool = Field(default=False, description="Agregar enlace de Google Meet")
+    calendar_id: str = Field(default="primary", description="ID del calendario")
+    agent_id: str | None = Field(default=None, description="ID del agente que crea el evento (para logging)")
+
+
+class CalendarEventUpdateRequest(BaseModel):
+    """Modelo para actualizar un evento existente en Google Calendar."""
+    summary: str | None = Field(default=None, description="Nuevo título")
+    start_datetime: str | None = Field(default=None, description="Nueva fecha/hora de inicio ISO 8601")
+    end_datetime: str | None = Field(default=None, description="Nueva fecha/hora de fin ISO 8601")
+    description: str | None = Field(default=None, description="Nueva descripción")
+    location: str | None = Field(default=None, description="Nueva ubicación")
+    attendees: list[str] | None = Field(default=None, description="Nueva lista de participantes")
+    timezone: str = Field(default="America/Mexico_City", description="Zona horaria")
+    calendar_id: str = Field(default="primary", description="ID del calendario")
+
+
+class CalendarCheckAvailabilityRequest(BaseModel):
+    """Modelo para verificar disponibilidad de participantes."""
+    emails: list[str] = Field(..., description="Emails de participantes a verificar", example=["usuario@gmail.com"])
+    time_min: str = Field(..., description="Inicio del rango ISO 8601", example="2026-03-26T09:00:00-06:00")
+    time_max: str = Field(..., description="Fin del rango ISO 8601", example="2026-03-26T18:00:00-06:00")
+    timezone: str = Field(default="America/Mexico_City", description="Zona horaria")
 
 
 class SupervisorConfigUpdate(BaseModel):

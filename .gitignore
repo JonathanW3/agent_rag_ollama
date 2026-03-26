@@ -25,6 +25,12 @@ chroma_data/
 *.swp
 *.swo
 
+# Environment
+.env
+
+# Credentials
+mcp_google_calendar/credentials/
+
 # OS
 .DS_Store
 Thumbs.db

@@ -4,11 +4,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
 from .agents import create_default_agent
 from .utils.json_sanitize import SanitizeJSONMiddleware
-from .routers import health, agents, chat, sessions, documents, chromadb, ollama, mcp_sqlite, mysql, email, orchestrator, supervisor
+from .routers import health, agents, chat, sessions, documents, chromadb, ollama, mcp_sqlite, mysql, ibm, autopart, email, orchestrator, supervisor, google_calendar
 
 
 # Metadata para Swagger UI
 tags_metadata = [
+    {
+        "name": "📅 Google Calendar",
+        "description": "Gestión de eventos y reuniones en Google Calendar. Crear, listar, actualizar, eliminar eventos y verificar disponibilidad."
+    },
     {
         "name": "📧 Email",
         "description": "Envío de emails mediante SMTP. Configura agentes con credenciales para enviar emails automáticamente."
@@ -20,6 +24,14 @@ tags_metadata = [
     {
         "name": "🏥 MySQL Farmacia",
         "description": "Acceso de solo lectura a la base de datos de farmacias (farmacia_db)."
+    },
+    {
+        "name": "🏢 MySQL IBM",
+        "description": "Acceso de solo lectura a la base de datos IBM (credit_cards, bank_transactions, employees, hr_attrition, sales_orders)."
+    },
+    {
+        "name": "🚗 MySQL Autopart",
+        "description": "Acceso de solo lectura a la base de datos Autopart (vehicles, product_category, seller, applications, compatibility)."
     },
     {
         "name": "🗄️ MCP SQLite",
@@ -125,7 +137,10 @@ app.include_router(chromadb.router)
 app.include_router(ollama.router)
 app.include_router(mcp_sqlite.router)
 app.include_router(mysql.router)
+app.include_router(ibm.router)
+app.include_router(autopart.router)
 app.include_router(email.router)
+app.include_router(google_calendar.router)
 app.include_router(orchestrator.router)
 app.include_router(supervisor.router)
 
