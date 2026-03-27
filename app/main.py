@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
 from .agents import create_default_agent
 from .utils.json_sanitize import SanitizeJSONMiddleware
-from .routers import health, agents, chat, sessions, documents, chromadb, ollama, mcp_sqlite, mysql, ibm, autopart, email, orchestrator, supervisor, google_calendar
+from .routers import health, agents, chat, sessions, documents, chromadb, ollama, mcp_sqlite, mysql, ibm, autopart, email, orchestrator, supervisor, google_calendar, whatsapp
 
 
 # Metadata para Swagger UI
@@ -72,6 +72,10 @@ tags_metadata = [
     {
         "name": "🔍 Supervisor",
         "description": "Agente supervisor que evalúa la calidad de otros agentes, sugiere mejoras de prompts y gestiona aprobaciones humanas."
+    },
+    {
+        "name": "📱 WhatsApp",
+        "description": "Integración con WhatsApp: vincular sesiones a organizaciones, registrar números con agentes, recibir y responder mensajes automáticamente."
     },
     {
         "name": "⚙️ Sistema",
@@ -143,6 +147,7 @@ app.include_router(email.router)
 app.include_router(google_calendar.router)
 app.include_router(orchestrator.router)
 app.include_router(supervisor.router)
+app.include_router(whatsapp.router)
 
 # Crear directorios necesarios
 os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
@@ -150,9 +155,27 @@ os.makedirs(settings.CHROMA_DIR, exist_ok=True)
 
 
 @app.on_event("startup")
-def on_startup():
-    """Inicialización al arrancar: crea agente por defecto si Redis está disponible."""
+async def on_startup():
+    """Inicialización al arrancar: crea agente por defecto y re-registra webhooks de WhatsApp."""
     try:
         create_default_agent()
     except Exception as e:
         print(f"WARNING: No se pudo crear agente por defecto (Redis disponible?): {e}")
+
+    # Re-registrar webhooks de WhatsApp para todas las organizaciones vinculadas
+    try:
+        from app.whatsapp import list_whatsapp_orgs
+        from app.whatsapp_client import wa_register_webhook
+        orgs = list_whatsapp_orgs()
+        for org in orgs:
+            webhook_url = org.get("webhook_url")
+            wa_session_id = org.get("wa_session_id")
+            org_name = org.get("organization", "?")
+            if webhook_url and wa_session_id:
+                try:
+                    await wa_register_webhook(wa_session_id, webhook_url)
+                    print(f"[STARTUP] Webhook re-registrado para '{org_name}' → {webhook_url}")
+                except Exception as e:
+                    print(f"[STARTUP] Error re-registrando webhook para '{org_name}': {e}")
+    except Exception as e:
+        print(f"WARNING: No se pudieron re-registrar webhooks de WhatsApp: {e}")

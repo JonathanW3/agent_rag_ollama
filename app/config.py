@@ -24,6 +24,7 @@ class Settings(BaseModel):
     REDIS_DB: int = int(os.getenv("REDIS_DB", "0"))
     SESSION_TTL: int = int(os.getenv("SESSION_TTL", "3600"))  # 1 hora en segundos
     ENCRYPTION_KEY: str = os.getenv("ENCRYPTION_KEY", "")  # Clave para cifrar datos sensibles (SMTP)
+    PUBLIC_API_URL: str = os.getenv("PUBLIC_API_URL", "http://localhost:8000")  # URL pública del API (para webhooks)
 
     class Config:
         validate_assignment = True

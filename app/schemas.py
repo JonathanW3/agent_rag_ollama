@@ -224,6 +224,50 @@ class CalendarCheckAvailabilityRequest(BaseModel):
     timezone: str = Field(default="America/Mexico_City", description="Zona horaria")
 
 
+# ── WhatsApp ──────────────────────────────────────────────
+
+class WhatsAppLinkRequest(BaseModel):
+    """Vincular una sesión de WhatsApp a una organización.
+
+    El wa_session_id es opcional. Si se omite, se genera automáticamente
+    desde el nombre de la organización en formato alfanumérico + 'whts'.
+    Ejemplo: 'Mi Empresa-1' → 'miempresa1whts'
+    """
+    organization: str = Field(..., description="Nombre de la organización", example="MiEmpresa")
+    wa_session_id: str | None = Field(default=None, description="ID personalizado de la sesión WA (solo alfanumérico, se genera auto si se omite)", example="miempresawhts")
+    default_agent_id: str = Field(default="default", description="Agente que atiende números no registrados", example="atencion-cliente")
+    webhook_base_url: str | None = Field(default=None, description="URL base pública para registrar el webhook (ej: https://midominio.com). Si se omite, no se registra webhook automáticamente.", example="https://midominio.com")
+    force: bool = Field(default=False, description="Si True, desvincula la sesión anterior automáticamente antes de re-vincular")
+
+
+class WhatsAppNumberRegister(BaseModel):
+    """Registrar un número telefónico con un agente específico."""
+    phone_number: str = Field(..., description="Número de teléfono (formato internacional sin +)", example="5215512345678")
+    agent_id: str = Field(..., description="ID del agente que atenderá este número", example="ventas-bot")
+
+
+class WhatsAppNumberBulkRegister(BaseModel):
+    """Registrar múltiples números telefónicos a la vez."""
+    numbers: list[WhatsAppNumberRegister] = Field(..., description="Lista de números con sus agentes")
+
+
+class WhatsAppUpdateDefaultAgent(BaseModel):
+    """Actualizar el agente por defecto de una organización."""
+    default_agent_id: str = Field(..., description="Nuevo agente por defecto para números no registrados", example="atencion-cliente")
+
+
+class WhatsAppWebhookRegister(BaseModel):
+    """Registrar webhook para recibir mensajes entrantes de WhatsApp."""
+    webhook_base_url: str | None = Field(default=None, description="URL base pública (ej: https://midominio.com). Si se omite, usa PUBLIC_API_URL del .env", example="https://midominio.com")
+
+
+class WhatsAppSendRequest(BaseModel):
+    """Enviar un mensaje manualmente por WhatsApp."""
+    organization: str = Field(..., description="Organización (para resolver la sesión WA)", example="MiEmpresa")
+    to: str = Field(..., description="Número destino (formato internacional sin +)", example="5215512345678")
+    text: str = Field(..., description="Texto del mensaje", example="Hola, ¿en qué puedo ayudarte?")
+
+
 class SupervisorConfigUpdate(BaseModel):
     """Modelo para actualizar la configuración del supervisor.
 
