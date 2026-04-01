@@ -1,5 +1,6 @@
 import re
 import json
+from datetime import datetime, timedelta, timezone
 from .json_sanitize import sanitize_llm_json
 
 
@@ -52,6 +53,32 @@ async def execute_calendar_actions(
 
         try:
             if action_type == "create_event":
+                # Validar que la fecha sea al menos mañana
+                try:
+                    start_dt = datetime.fromisoformat(action["start_datetime"])
+                    tomorrow = datetime.now(start_dt.tzinfo) + timedelta(days=1)
+                    tomorrow_start = tomorrow.replace(hour=0, minute=0, second=0, microsecond=0)
+                    if start_dt < tomorrow_start:
+                        results.append({
+                            "index": i,
+                            "action_type": action_type,
+                            "success": False,
+                            "error": (
+                                f"No se pueden agendar eventos para hoy ni fechas pasadas. "
+                                f"Fecha solicitada: {action['start_datetime']}. "
+                                f"La fecha mínima permitida es: {tomorrow_start.strftime('%Y-%m-%dT%H:%M:%S')}"
+                            ),
+                        })
+                        continue
+                except (ValueError, TypeError) as e:
+                    results.append({
+                        "index": i,
+                        "action_type": action_type,
+                        "success": False,
+                        "error": f"Formato de fecha inválido en start_datetime: {action.get('start_datetime')} — {e}",
+                    })
+                    continue
+
                 result = await calendar_client.create_event(
                     summary=action["summary"],
                     start_datetime=action["start_datetime"],

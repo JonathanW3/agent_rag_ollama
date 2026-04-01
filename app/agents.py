@@ -30,7 +30,7 @@ def _decrypt_agent_smtp(agent: dict) -> dict:
     return agent
 
 
-def create_agent(name: str, prompt: str, description: str = "", agent_id: str = None, organization: str = None, llm_model: str = None, sqlite_db_path: str = None, use_rag: bool = True, smtp_config: dict = None, use_mysql: bool = False, use_email: bool = False, use_charts: bool = False, use_ibm: bool = False, use_autopart: bool = False, top_k: int = 4, temperature: float = 0.7) -> dict:
+def create_agent(name: str, prompt: str, description: str = "", agent_id: str = None, organization: str = None, llm_model: str = None, sqlite_db_path: str = None, use_rag: bool = True, smtp_config: dict = None, use_mysql: bool = False, use_email: bool = False, use_charts: bool = False, use_calendar: bool = False, use_ibm: bool = False, use_autopart: bool = False, top_k: int = 4, temperature: float = 0.7, alert_wa_session_id: str = None, alert_wa_number: str = None, alert_email: str = None) -> dict:
     """Crea un nuevo agente."""
     client = get_redis_client()
 
@@ -56,10 +56,14 @@ def create_agent(name: str, prompt: str, description: str = "", agent_id: str = 
         "use_mysql": use_mysql,
         "use_email": use_email,
         "use_charts": use_charts,
+        "use_calendar": use_calendar,
         "use_ibm": use_ibm,
         "use_autopart": use_autopart,
         "top_k": top_k,
         "temperature": temperature,
+        "alert_wa_session_id": alert_wa_session_id,
+        "alert_wa_number": alert_wa_number,
+        "alert_email": alert_email,
         "created_at": now,
         "updated_at": now
     }
@@ -120,7 +124,7 @@ def list_organizations() -> list[dict]:
         for name, count in sorted(org_counts.items())
     ]
 
-def update_agent(agent_id: str, name: str = None, prompt: str = None, description: str = None, organization: str = None, llm_model: str = None, sqlite_db_path: str = None, use_rag: bool = None, smtp_config: dict = None, use_mysql: bool = None, use_email: bool = None, use_charts: bool = None, use_ibm: bool = None, use_autopart: bool = None, top_k: int = None, temperature: float = None) -> dict:
+def update_agent(agent_id: str, name: str = None, prompt: str = None, description: str = None, organization: str = None, llm_model: str = None, sqlite_db_path: str = None, use_rag: bool = None, smtp_config: dict = None, use_mysql: bool = None, use_email: bool = None, use_charts: bool = None, use_calendar: bool = None, use_ibm: bool = None, use_autopart: bool = None, top_k: int = None, temperature: float = None, alert_wa_session_id: str = None, alert_wa_number: str = None, alert_email: str = None) -> dict:
     """Actualiza un agente existente."""
     client = get_redis_client()
     key = get_agent_key(agent_id)
@@ -153,6 +157,8 @@ def update_agent(agent_id: str, name: str = None, prompt: str = None, descriptio
         agent["use_email"] = use_email
     if use_charts is not None:
         agent["use_charts"] = use_charts
+    if use_calendar is not None:
+        agent["use_calendar"] = use_calendar
     if use_ibm is not None:
         agent["use_ibm"] = use_ibm
     if use_autopart is not None:
@@ -161,6 +167,12 @@ def update_agent(agent_id: str, name: str = None, prompt: str = None, descriptio
         agent["top_k"] = top_k
     if temperature is not None:
         agent["temperature"] = temperature
+    if alert_wa_session_id is not None:
+        agent["alert_wa_session_id"] = alert_wa_session_id
+    if alert_wa_number is not None:
+        agent["alert_wa_number"] = alert_wa_number
+    if alert_email is not None:
+        agent["alert_email"] = alert_email
 
     agent["updated_at"] = datetime.now(timezone.utc).isoformat()
 

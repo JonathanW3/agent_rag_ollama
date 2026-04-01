@@ -39,10 +39,14 @@ def create_new_agent(req: AgentCreate):
             use_mysql=req.use_mysql,
             use_email=req.use_email,
             use_charts=req.use_charts,
+            use_calendar=req.use_calendar,
             use_ibm=req.use_ibm,
             use_autopart=req.use_autopart,
             top_k=req.top_k,
-            temperature=req.temperature
+            temperature=req.temperature,
+            alert_wa_session_id=req.alert_wa_session_id,
+            alert_wa_number=req.alert_wa_number,
+            alert_email=req.alert_email,
         )
         return agent
     except ValueError as e:
@@ -129,10 +133,14 @@ def update_agent_details(agent_id: str, req: AgentUpdate):
             use_mysql=req.use_mysql,
             use_email=req.use_email,
             use_charts=req.use_charts,
+            use_calendar=req.use_calendar,
             use_ibm=req.use_ibm,
             use_autopart=req.use_autopart,
             top_k=req.top_k,
-            temperature=req.temperature
+            temperature=req.temperature,
+            alert_wa_session_id=req.alert_wa_session_id,
+            alert_wa_number=req.alert_wa_number,
+            alert_email=req.alert_email,
         )
         return agent
     except ValueError as e:

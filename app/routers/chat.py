@@ -11,6 +11,8 @@ from ..rag.retrieve import retrieve, build_context
 from ..utils.email_helpers import parse_email_actions, execute_email_actions
 from ..utils.chart_helpers import parse_chart_actions
 from ..utils.calendar_helpers import parse_calendar_actions, execute_calendar_actions
+from ..utils.cotizacion_helpers import parse_cotizacion_actions
+from ..utils.alert_helpers import build_calendar_alert, build_cotizacion_alert, send_alert
 from mcp_sqlite.client import get_mcp_client
 from mcp_email.client import get_email_client
 from mcp_mysql.client import get_mysql_client
@@ -249,8 +251,14 @@ async def chat(req: ChatRequest):
 
     # Inyectar capacidad de Google Calendar si está habilitado
     if eff_use_calendar:
+        from datetime import datetime as _dt, timedelta as _td
+        _now = _dt.now()
+        _tomorrow = _now + _td(days=1)
         calendar_instructions = (
             "\n\n--- CAPACIDAD DE GOOGLE CALENDAR ---\n"
+            f"FECHA Y HORA ACTUAL: {_now.strftime('%Y-%m-%dT%H:%M:%S')} (zona: America/Mexico_City)\n"
+            f"FECHA MÍNIMA PARA AGENDAR EVENTOS: {_tomorrow.strftime('%Y-%m-%d')}T00:00:00\n"
+            f"AÑO ACTUAL: {_now.year}\n\n"
             "Tienes la capacidad de gestionar eventos y reuniones en Google Calendar. "
             "Puedes crear reuniones, listar eventos, verificar disponibilidad, actualizar y eliminar eventos.\n\n"
 
@@ -342,6 +350,8 @@ async def chat(req: ChatRequest):
             "- SIEMPRE escribe tu respuesta al usuario PRIMERO, luego el bloque [CALENDAR_ACTION] al final\n"
             "- Las fechas DEBEN estar en formato ISO 8601 (YYYY-MM-DDTHH:MM:SS)\n"
             "- Si el usuario dice 'mañana a las 10', calcula la fecha correcta basándote en la fecha actual\n"
+            "- PROHIBIDO agendar eventos para el día de hoy o fechas pasadas. Solo se permiten eventos a partir de MAÑANA. "
+            "Si el usuario pide agendar algo para hoy, respóndele que solo puedes agendar a partir de mañana y pregúntale si desea agendarlo para mañana.\n"
             "- Si el usuario no especifica hora de fin, asume 1 hora de duración\n"
             "- Si el usuario no especifica zona horaria, usa America/Mexico_City\n"
             "- Para 'hoy' o 'mañana', genera time_min y time_max cubriendo el día completo (00:00 a 23:59)\n"
@@ -360,6 +370,41 @@ async def chat(req: ChatRequest):
             "--- FIN CAPACIDAD DE GOOGLE CALENDAR ---"
         )
         messages[0]["content"] += calendar_instructions
+
+    # Inyectar capacidad de cotizaciones (siempre activa si hay alertas configuradas)
+    _has_alerts = agent.get("alert_wa_number") or agent.get("alert_email")
+    if _has_alerts:
+        cotizacion_instructions = (
+            "\n\n--- CAPACIDAD DE COTIZACIONES ---\n"
+            "Cuando el usuario solicite una cotización, presupuesto o lista de precios, "
+            "genera un bloque [COTIZACION_ACTION] al final de tu respuesta con los datos estructurados.\n\n"
+
+            "FORMATO:\n"
+            "[COTIZACION_ACTION]\n"
+            "{\n"
+            '  "cliente": "Nombre del cliente o descripción",\n'
+            '  "productos": [\n'
+            '    {"nombre": "Producto 1", "cantidad": 2, "precio": "$50.00"},\n'
+            '    {"nombre": "Producto 2", "cantidad": 1, "precio": "$30.00"}\n'
+            '  ],\n'
+            '  "total": "$130.00",\n'
+            '  "moneda": "USD",\n'
+            '  "notas": "Observaciones adicionales"\n'
+            "}\n"
+            "[/COTIZACION_ACTION]\n\n"
+
+            "CAMPOS OBLIGATORIOS: cliente, productos\n"
+            "CAMPOS OPCIONALES: total, moneda (default USD), notas\n\n"
+
+            "REGLAS:\n"
+            "- SIEMPRE escribe tu respuesta al usuario PRIMERO, luego el bloque [COTIZACION_ACTION] al final\n"
+            "- Incluye TODOS los productos/servicios mencionados con cantidades y precios\n"
+            "- Si el precio no está disponible, usa 'Por confirmar'\n"
+            "- Extrae el nombre del cliente de la conversación si fue mencionado\n"
+            "- PROHIBIDO generar bloques [RESULTADO DE COTIZACION]. Esos los genera el SISTEMA\n"
+            "--- FIN CAPACIDAD DE COTIZACIONES ---"
+        )
+        messages[0]["content"] += cotizacion_instructions
 
     # Agregar contexto SQL si está habilitado y es relevante
     if req.use_sql and mcp_client:
@@ -661,6 +706,58 @@ async def chat(req: ChatRequest):
             # Mostrar los últimos 500 chars de la respuesta para ver qué generó el LLM
             print(f"[EMAIL DEBUG] Final de respuesta LLM (últimos 500 chars): ...{answer[-500:]}")
 
+            # ── RETRY: detectar intención de email sin bloque [EMAIL_ACTION] ──
+            # Si el LLM mencionó enviar/mandar correo o incluyó una dirección de email
+            # pero no generó el bloque, pedirle explícitamente que lo genere.
+            import re as _re
+            # Patrones de envío ACTIVO (el LLM afirma que ya envió o está enviando)
+            email_intent_patterns = [
+                r'te mand[oé]', r'ya.*envi[eé]', r'procesando.*envío',
+                r'te envío la cotización', r'enviando.*correo',
+                r'te he enviado', r'correo enviado',
+            ]
+            # Patrones de OFRECIMIENTO (NO deben disparar retry)
+            email_offer_patterns = [
+                r'te puedo enviar', r'puedo enviarte', r'si lo deseas',
+                r'si quieres', r'¿te envío', r'¿quieres que.*envi',
+                r'¿te gustaría', r'si deseas', r'te interesa.*enviar',
+            ]
+            has_email_intent = any(_re.search(p, answer, _re.IGNORECASE) for p in email_intent_patterns)
+            is_just_offer = any(_re.search(p, answer, _re.IGNORECASE) for p in email_offer_patterns)
+
+            # Solo retry si hay intención ACTIVA de envío, NO si solo es un ofrecimiento
+            if has_email_intent and not is_just_offer:
+                print(f"[EMAIL DEBUG] Intención de email detectada sin bloque. Reintentando con prompt explícito...")
+                # Extraer el email destino de la respuesta si existe
+                found_email = _re.search(r'([\w.+-]+@[\w-]+\.[\w.-]+)', answer)
+                email_hint = f" El destinatario es: {found_email.group(1)}" if found_email else ""
+
+                retry_messages = messages + [
+                    {"role": "assistant", "content": answer},
+                    {"role": "user", "content": (
+                        "SISTEMA: Tu respuesta anterior menciona enviar un correo pero NO incluiste "
+                        "el bloque [EMAIL_ACTION] necesario. Sin ese bloque el correo NO se envía.\n"
+                        f"{email_hint}\n"
+                        "Genera SOLO el bloque [EMAIL_ACTION] con el JSON completo. "
+                        "No repitas tu respuesta anterior, SOLO genera el bloque:\n\n"
+                        "[EMAIL_ACTION]\n"
+                        '{"to": "...", "subject": "...", "body": "...", "html": false}\n'
+                        "[/EMAIL_ACTION]"
+                    )}
+                ]
+                try:
+                    retry_answer = ollama_chat(retry_messages, temperature=eff_temperature, model=agent_model)
+                    print(f"[EMAIL DEBUG] Retry respuesta: {retry_answer[:300]}")
+                    if "[EMAIL_ACTION]" in retry_answer:
+                        # Agregar el bloque al answer original para que se parsee
+                        answer = answer + "\n" + retry_answer
+                        print("[EMAIL DEBUG] Retry exitoso: bloque [EMAIL_ACTION] recuperado")
+                    else:
+                        print("[EMAIL DEBUG] Retry fallido: el modelo sigue sin generar el bloque")
+                except Exception as e:
+                    print(f"[EMAIL DEBUG] Error en retry: {e}")
+            # ── FIN RETRY ──
+
     if email_enabled:
         email_actions, cleaned_answer = parse_email_actions(answer)
         print(f"[EMAIL DEBUG] Acciones parseadas: {len(email_actions)}")
@@ -696,22 +793,152 @@ async def chat(req: ChatRequest):
     calendar_executed = False
 
     if eff_use_calendar:
-        # Limpiar bloques falsos de resultado generados por el LLM
-        fake_calendar_pattern = r'\[RESULTADO DE CALENDARIO\].*?\[/RESULTADO DE CALENDARIO\]'
-        answer = re.sub(fake_calendar_pattern, '', answer, flags=re.DOTALL).strip()
+        try:
+            # Limpiar bloques falsos de resultado generados por el LLM
+            fake_calendar_pattern = r'\[RESULTADO DE CALENDARIO\].*?\[/RESULTADO DE CALENDARIO\]'
+            answer = re.sub(fake_calendar_pattern, '', answer, flags=re.DOTALL).strip()
 
-        calendar_actions, cleaned_answer = parse_calendar_actions(answer)
-        print(f"[CALENDAR DEBUG] Acciones parseadas: {len(calendar_actions)}")
+            # ── RETRY: detectar intención de calendario sin bloque [CALENDAR_ACTION] ──
+            has_calendar_tag = "[CALENDAR_ACTION]" in answer
+            print(f"[CALENDAR DEBUG] ¿Contiene [CALENDAR_ACTION]? {has_calendar_tag}")
+            if not has_calendar_tag:
+                print(f"[CALENDAR DEBUG] Final de respuesta LLM (últimos 500 chars): ...{answer[-500:]}")
+                import re as _re_cal
+                # Patrones de agendamiento ACTIVO (el LLM afirma que ya agendó)
+                calendar_intent_patterns = [
+                    r'cita.*agendada', r'reuni[oó]n.*agendada', r'cita.*programada',
+                    r'reuni[oó]n.*programada', r'te agend[oé]', r'queda.*agendad[ao]',
+                    r'evento.*cread[ao]', r'te he agendado', r'cita confirmada',
+                    r'procesando.*cita', r'procesando.*reuni[oó]n',
+                ]
+                # Patrones de OFRECIMIENTO o referencia pasada (NO deben disparar retry)
+                calendar_offer_patterns = [
+                    r'¿te agendo', r'¿quieres.*agend', r'¿te gustaría.*agend',
+                    r'puedo agendarte', r'si quieres.*agend', r'si deseas.*agend',
+                    r'retomando.*cita', r'lo de tu cita', r'tu cita.*para mañana',
+                    r'antes de tu visita', r'tu cita de',
+                ]
+                has_calendar_intent = any(_re_cal.search(p, answer, _re_cal.IGNORECASE) for p in calendar_intent_patterns)
+                is_just_cal_offer = any(_re_cal.search(p, answer, _re_cal.IGNORECASE) for p in calendar_offer_patterns)
 
-        if calendar_actions:
-            cal_client = get_calendar_client()
-            calendar_results = await execute_calendar_actions(
-                actions=calendar_actions,
-                calendar_client=cal_client,
-            )
-            calendar_executed = any(r.get("success") for r in calendar_results)
-            answer = cleaned_answer
+                # Solo retry si hay intención ACTIVA de agendar, NO si solo es ofrecimiento/referencia
+                if has_calendar_intent and not is_just_cal_offer:
+                    print(f"[CALENDAR DEBUG] Intención de calendario detectada sin bloque. Reintentando con prompt explícito...")
+                    retry_messages = messages + [
+                        {"role": "assistant", "content": answer},
+                        {"role": "user", "content": (
+                            "SISTEMA: Tu respuesta anterior menciona agendar/programar una cita o reunión pero NO incluiste "
+                            "el bloque [CALENDAR_ACTION] necesario. Sin ese bloque la cita NO se agenda en Google Calendar.\n"
+                            "Genera SOLO el bloque [CALENDAR_ACTION] con el JSON completo basándote en los datos "
+                            "de tu respuesta anterior (fecha, hora, descripción, etc). "
+                            "No repitas tu respuesta anterior, SOLO genera el bloque:\n\n"
+                            "[CALENDAR_ACTION]\n"
+                            '{"action_type": "create_event", "summary": "...", "start_datetime": "YYYY-MM-DDTHH:MM:SS", '
+                            '"end_datetime": "YYYY-MM-DDTHH:MM:SS", "description": "...", "location": "...", '
+                            '"timezone": "America/Mexico_City"}\n'
+                            "[/CALENDAR_ACTION]"
+                        )}
+                    ]
+                    try:
+                        retry_answer = ollama_chat(retry_messages, temperature=eff_temperature, model=agent_model)
+                        print(f"[CALENDAR DEBUG] Retry respuesta: {retry_answer[:300]}")
+                        if "[CALENDAR_ACTION]" in retry_answer:
+                            answer = answer + "\n" + retry_answer
+                            print("[CALENDAR DEBUG] Retry exitoso: bloque [CALENDAR_ACTION] recuperado")
+                        else:
+                            print("[CALENDAR DEBUG] Retry fallido: el modelo sigue sin generar el bloque")
+                    except Exception as e:
+                        print(f"[CALENDAR DEBUG] Error en retry: {e}")
+            # ── FIN RETRY CALENDARIO ──
+
+            calendar_actions, cleaned_answer = parse_calendar_actions(answer)
+            print(f"[CALENDAR DEBUG] Acciones parseadas: {len(calendar_actions)}")
+
+            if calendar_actions:
+                print(f"[CALENDAR DEBUG] Ejecutando {len(calendar_actions)} acciones: {calendar_actions}")
+                cal_client = get_calendar_client()
+                calendar_results = await execute_calendar_actions(
+                    actions=calendar_actions,
+                    calendar_client=cal_client,
+                )
+                calendar_executed = any(r.get("success") for r in calendar_results)
+                print(f"[CALENDAR DEBUG] Resultados: {calendar_results}")
+                print(f"[CALENDAR DEBUG] calendar_executed={calendar_executed}")
+                answer = cleaned_answer
+        except Exception as e:
+            print(f"[CALENDAR ERROR] Error en post-procesamiento de calendario: {e}")
+            import traceback
+            traceback.print_exc()
     # ── END CALENDAR POST-PROCESSING ────────────────────────────────────
+
+    # ── COTIZACION POST-PROCESSING ─────────────────────────────────────
+    cotizacion_actions = []
+    _has_alerts = agent.get("alert_wa_number") or agent.get("alert_email")
+    if _has_alerts:
+        # Limpiar bloques falsos de resultado
+        fake_cotiz_pattern = r'\[RESULTADO DE COTIZACION\].*?\[/RESULTADO DE COTIZACION\]'
+        answer = re.sub(fake_cotiz_pattern, '', answer, flags=re.DOTALL).strip()
+
+        cotizacion_actions, cleaned_answer = parse_cotizacion_actions(answer)
+        print(f"[COTIZACION DEBUG] Acciones parseadas: {len(cotizacion_actions)}")
+        if cotizacion_actions:
+            answer = cleaned_answer
+    # ── END COTIZACION POST-PROCESSING ─────────────────────────────────
+
+    # ── ALERTAS (WhatsApp + Email) ─────────────────────────────────────
+    alert_results = []
+    if _has_alerts:
+        try:
+            conversation_for_alert = messages[1:]  # Excluir system prompt
+
+            # Alerta por reunión agendada exitosamente
+            if calendar_executed and calendar_actions:
+                for i, r in enumerate(calendar_results):
+                    if r.get("success") and r.get("action_type") == "create_event":
+                        alert_text = build_calendar_alert(
+                            calendar_result=r,
+                            calendar_action=calendar_actions[i] if i < len(calendar_actions) else {},
+                            session_id=req.session_id,
+                            agent_name=agent["name"],
+                            conversation_summary=conversation_for_alert,
+                        )
+                        result = await send_alert(
+                            alert_text=alert_text,
+                            alert_wa_session_id=agent.get("alert_wa_session_id"),
+                            alert_wa_number=agent.get("alert_wa_number"),
+                            alert_email=agent.get("alert_email"),
+                            smtp_config=agent.get("smtp_config"),
+                            agent_name=agent["name"],
+                        )
+                        alert_results.append({"type": "calendar", "result": result})
+
+            # Alerta por cotización generada
+            for cotiz_action in cotizacion_actions:
+                if "_parse_error" in cotiz_action:
+                    continue
+                alert_text = build_cotizacion_alert(
+                    cotizacion_action=cotiz_action,
+                    session_id=req.session_id,
+                    agent_name=agent["name"],
+                    conversation_summary=conversation_for_alert,
+                )
+                result = await send_alert(
+                    alert_text=alert_text,
+                    alert_wa_session_id=agent.get("alert_wa_session_id"),
+                    alert_wa_number=agent.get("alert_wa_number"),
+                    alert_email=agent.get("alert_email"),
+                    smtp_config=agent.get("smtp_config"),
+                    agent_name=agent["name"],
+                )
+                alert_results.append({"type": "cotizacion", "result": result})
+        except Exception as e:
+            print(f"[ALERT ERROR] Error enviando alertas: {e}")
+            import traceback
+            traceback.print_exc()
+
+    if alert_results:
+        print(f"[ALERT DEBUG] Alertas enviadas: {len(alert_results)} — {alert_results}")
+    # ── END ALERTAS ────────────────────────────────────────────────────
 
     # Construir resumen de emails para inyectar en el historial
     email_summary = ""
@@ -754,14 +981,42 @@ async def chat(req: ChatRequest):
                 lines.append(f"  - FALLÓ {action_type}: {r.get('error', 'desconocido')}")
         calendar_summary = "[RESULTADO DE CALENDARIO]\n" + "\n".join(lines) + "\n[/RESULTADO DE CALENDARIO]"
 
+    # Construir resumen de cotización para inyectar en el historial
+    cotizacion_summary = ""
+    if cotizacion_actions:
+        lines = []
+        for ca in cotizacion_actions:
+            if "_parse_error" in ca:
+                lines.append(f"  - FALLÓ: {ca['_parse_error']}")
+            else:
+                lines.append(f"  - Cliente: {ca.get('cliente', '—')} | Total: {ca.get('total', '—')} {ca.get('moneda', 'USD')}")
+        cotizacion_summary = "[RESULTADO DE COTIZACION]\n" + "\n".join(lines) + "\n[/RESULTADO DE COTIZACION]"
+
+    # Construir resumen de alertas
+    alert_summary = ""
+    if alert_results:
+        lines = []
+        for ar in alert_results:
+            tipo = ar["type"]
+            wa_ok = ar["result"].get("whatsapp", {})
+            em_ok = ar["result"].get("email", {})
+            wa_status = "OK" if wa_ok and wa_ok.get("success") else ("FALLÓ" if wa_ok else "N/A")
+            em_status = "OK" if em_ok and em_ok.get("success") else ("FALLÓ" if em_ok else "N/A")
+            lines.append(f"  - {tipo.upper()} → WA: {wa_status} | Email: {em_status}")
+        alert_summary = "[RESULTADO DE ALERTAS]\n" + "\n".join(lines) + "\n[/RESULTADO DE ALERTAS]"
+
     # Guardar mensaje del usuario y respuesta limpia en Redis
     save_message(req.agent_id, req.session_id, "user", req.message)
-    # Guardar respuesta del asistente con el resumen de emails, gráficos y calendario
+    # Guardar respuesta del asistente con el resumen de emails, gráficos, calendario, cotización y alertas
     answer_to_save = answer
     if email_summary:
         answer_to_save = f"{answer_to_save}\n\n{email_summary}"
     if calendar_summary:
         answer_to_save = f"{answer_to_save}\n\n{calendar_summary}"
+    if cotizacion_summary:
+        answer_to_save = f"{answer_to_save}\n\n{cotizacion_summary}"
+    if alert_summary:
+        answer_to_save = f"{answer_to_save}\n\n{alert_summary}"
     save_message(req.agent_id, req.session_id, "assistant", answer_to_save, charts=charts if charts else None)
 
     # Registrar la conversación en SQLite si está habilitado
@@ -819,4 +1074,6 @@ async def chat(req: ChatRequest):
         "charts_count": len(charts),
         "calendar_executed": calendar_executed,
         "calendar_results": calendar_results,
+        "cotizacion_count": len([c for c in cotizacion_actions if "_parse_error" not in c]),
+        "alert_results": alert_results,
     }

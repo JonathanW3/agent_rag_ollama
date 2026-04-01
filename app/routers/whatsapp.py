@@ -486,6 +486,10 @@ async def webhook_receive(wa_session_id: str, request: Request):
     try:
         chat_response = await chat_endpoint(chat_req)
     except Exception as e:
+        import traceback
+        print(f"[WEBHOOK ERROR] Agente={agent_id} Sesión={chat_session_id} Mensaje='{message_text[:100]}'")
+        print(f"[WEBHOOK ERROR] Excepción: {type(e).__name__}: {e}")
+        traceback.print_exc()
         # Intentar notificar error por WA
         error_msg = "Lo siento, ocurrió un error procesando tu mensaje. Intenta de nuevo."
         try:

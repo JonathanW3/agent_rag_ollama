@@ -47,6 +47,9 @@ class AgentCreate(BaseModel):
     use_autopart: bool = Field(default=False, description="Habilitar consultas MySQL Autopart (vehicles, applications, compatibility, etc.) por defecto")
     top_k: int = Field(default=4, ge=1, le=100, description="Número de documentos RAG a recuperar por defecto")
     temperature: float = Field(default=0.7, ge=0.0, le=2.0, description="Temperatura del modelo por defecto")
+    alert_wa_session_id: str | None = Field(default=None, description="ID de sesión WhatsApp para enviar alertas internas", example="miempresawhts")
+    alert_wa_number: str | None = Field(default=None, description="Número WhatsApp destino de alertas (formato internacional sin +)", example="5215512345678")
+    alert_email: str | None = Field(default=None, description="Email destino de alertas internas (usa smtp_config del agente)", example="gerencia@empresa.com")
 
 
 class AgentUpdate(BaseModel):
@@ -67,6 +70,9 @@ class AgentUpdate(BaseModel):
     use_autopart: bool | None = Field(default=None, description="Habilitar/deshabilitar MySQL Autopart para este agente")
     top_k: int | None = Field(default=None, ge=1, le=100, description="Número de documentos RAG a recuperar por defecto")
     temperature: float | None = Field(default=None, ge=0.0, le=2.0, description="Temperatura del modelo por defecto")
+    alert_wa_session_id: str | None = Field(default=None, description="ID de sesión WhatsApp para alertas internas")
+    alert_wa_number: str | None = Field(default=None, description="Número WhatsApp destino de alertas")
+    alert_email: str | None = Field(default=None, description="Email destino de alertas internas")
 
 
 class ModelSelectRequest(BaseModel):
