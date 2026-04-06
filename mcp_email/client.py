@@ -6,6 +6,7 @@ Cliente para interactuar con el servidor MCP Email desde FastAPI.
 
 import json
 from typing import Any, Dict, List, Optional
+from .imap_reader import IMAPReader
 
 
 class EmailMCPClient:
@@ -13,9 +14,9 @@ class EmailMCPClient:
     
     def __init__(self):
         """Inicializa el cliente MCP Email."""
-        # Importar el servidor localmente para uso directo
         from .server import EmailMCPServer
         self._server = EmailMCPServer()
+        self._imap = IMAPReader()
     
     async def send_email(
         self,
@@ -75,12 +76,96 @@ class EmailMCPClient:
     async def list_providers(self) -> Dict[str, Any]:
         """
         Lista los proveedores SMTP predefinidos.
-        
+
         Returns:
             Diccionario con proveedores disponibles
         """
         result = await self._server._list_providers()
         return result
+
+    async def read_inbox(
+        self,
+        imap_config: Dict[str, Any],
+        limit: int = 10,
+        folder: str = "INBOX",
+    ) -> Dict[str, Any]:
+        """
+        Lee los últimos N emails de la bandeja de entrada.
+
+        Args:
+            imap_config: {"server": str, "port": int, "email": str, "password": str}
+            limit: Número máximo de emails a retornar
+            folder: Carpeta IMAP (default: "INBOX")
+
+        Returns:
+            {"success": bool, "count": int, "emails": [...], "folder": str}
+        """
+        return await self._imap.read_inbox(
+            imap_config=imap_config,
+            limit=limit,
+            folder=folder,
+        )
+
+    async def search_emails(
+        self,
+        imap_config: Dict[str, Any],
+        from_addr: Optional[str] = None,
+        subject: Optional[str] = None,
+        since_date: Optional[str] = None,
+        keyword: Optional[str] = None,
+        unseen_only: bool = False,
+        limit: int = 10,
+        folder: str = "INBOX",
+    ) -> Dict[str, Any]:
+        """
+        Busca emails según criterios.
+
+        Args:
+            imap_config: {"server": str, "port": int, "email": str, "password": str}
+            from_addr: Filtrar por remitente
+            subject: Filtrar por asunto
+            since_date: Desde fecha (YYYY-MM-DD)
+            keyword: Palabra clave en el cuerpo
+            unseen_only: Solo emails no leídos
+            limit: Número máximo de resultados
+            folder: Carpeta IMAP
+
+        Returns:
+            {"success": bool, "count": int, "emails": [...], "criteria": str}
+        """
+        return await self._imap.search_emails(
+            imap_config=imap_config,
+            from_addr=from_addr,
+            subject=subject,
+            since_date=since_date,
+            keyword=keyword,
+            unseen_only=unseen_only,
+            limit=limit,
+            folder=folder,
+        )
+
+    async def read_email(
+        self,
+        imap_config: Dict[str, Any],
+        email_id: str,
+        folder: str = "INBOX",
+    ) -> Dict[str, Any]:
+        """
+        Lee el contenido completo de un email por su ID IMAP.
+
+        Args:
+            imap_config: {"server": str, "port": int, "email": str, "password": str}
+            email_id: ID del email obtenido de read_inbox o search_emails
+            folder: Carpeta donde está el email
+
+        Returns:
+            {"success": bool, "email": {id, from, to, subject, date, body, has_attachments}}
+        """
+        return await self._imap.read_email(
+            imap_config=imap_config,
+            email_id=email_id,
+            folder=folder,
+        )
 
 
 # Función helper singleton

@@ -1,7 +1,8 @@
 import os
 import re
 import json
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+from ..auth import get_current_org, OrgContext
 from ..config import settings
 from ..schemas import ChatRequest
 from ..agents import get_agent
@@ -9,6 +10,7 @@ from ..memory import save_message, get_history
 from ..ollama_client import ollama_chat
 from ..rag.retrieve import retrieve, build_context
 from ..utils.email_helpers import parse_email_actions, execute_email_actions
+from ..utils.imap_helpers import parse_imap_actions, execute_imap_actions, format_imap_results_for_history
 from ..utils.chart_helpers import parse_chart_actions
 from ..utils.calendar_helpers import parse_calendar_actions, execute_calendar_actions
 from ..utils.cotizacion_helpers import parse_cotizacion_actions
@@ -19,12 +21,14 @@ from mcp_mysql.client import get_mysql_client
 from mcp_mysql_ibm.client import get_ibm_client
 from mcp_mysql_autopart.client import get_autopart_client
 from mcp_google_calendar.client import get_calendar_client
+from mcp_FE.client import get_fe_client
+from ..utils.fe_helpers import parse_fe_actions, execute_fe_actions
 
 router = APIRouter(tags=["💬 Chat"])
 
 
 @router.post("/chat", summary="Conversar con un agente")
-async def chat(req: ChatRequest):
+async def chat(req: ChatRequest, org: OrgContext = Depends(get_current_org)):
     """Envía un mensaje a un agente y obtiene una respuesta con contexto RAG opcional y/o SQL."""
     # Verificar que el agente existe
     agent = get_agent(req.agent_id)
@@ -46,6 +50,11 @@ async def chat(req: ChatRequest):
     eff_use_ibm = req.use_ibm if req.use_ibm is not None else agent_default_ibm
     agent_default_autopart = agent.get("use_autopart", False)
     eff_use_autopart = req.use_autopart if req.use_autopart is not None else agent_default_autopart
+    # IMAP: si el agente tiene imap_config, habilitar por defecto
+    agent_default_imap = agent.get("use_imap", bool(agent.get("imap_config")))
+    eff_use_imap = req.use_imap if req.use_imap is not None else agent_default_imap
+    agent_default_fe = agent.get("use_fe", False)
+    eff_use_fe = req.use_fe if req.use_fe is not None else agent_default_fe
     eff_top_k = req.top_k if req.top_k is not None else agent.get("top_k", settings.TOP_K)
     eff_temperature = req.temperature if req.temperature is not None else agent.get("temperature", 0.7)
 
@@ -120,6 +129,108 @@ async def chat(req: ChatRequest):
             "--- FIN CAPACIDAD DE EMAIL ---"
         )
         messages[0]["content"] += email_instructions
+
+    # Inyectar capacidad de lectura IMAP si está habilitado y el agente tiene imap_config
+    imap_enabled = eff_use_imap and bool(agent.get("imap_config"))
+    if imap_enabled:
+        imap_instructions = (
+            "\n\n--- CAPACIDAD DE LECTURA DE EMAILS (IMAP) ---\n"
+            "Tienes acceso de LECTURA a la bandeja de correos del agente. "
+            "Cuando el usuario quiera revisar, buscar o leer emails, genera un bloque de acción "
+            "al FINAL de tu respuesta con este formato EXACTO:\n\n"
+            "[IMAP_ACTION]\n"
+            '{"action": "read_inbox", "limit": 10}\n'
+            "[/IMAP_ACTION]\n\n"
+            "IMPORTANTE: El contenido entre [IMAP_ACTION] y [/IMAP_ACTION] DEBE ser JSON válido puro, "
+            "sin texto adicional ni bloques markdown.\n\n"
+            "ACCIONES DISPONIBLES:\n\n"
+            "1. Leer los últimos N emails de la bandeja:\n"
+            '   {"action": "read_inbox", "limit": 10, "folder": "INBOX"}\n\n'
+            "2. Buscar emails por criterios (uno o más):\n"
+            '   {"action": "search_emails", "from": "juan@example.com", "subject": "Factura", '
+            '"since": "2024-01-15", "keyword": "pedido", "unseen_only": false, "limit": 10}\n'
+            "   - from: filtrar por remitente\n"
+            "   - subject: filtrar por asunto\n"
+            "   - since: desde fecha (formato YYYY-MM-DD)\n"
+            "   - keyword: palabra clave en el cuerpo\n"
+            "   - unseen_only: true para solo no leídos\n\n"
+            "3. Leer el contenido completo de un email por su ID:\n"
+            '   {"action": "read_email", "id": "123"}\n'
+            "   (el ID lo obtienes del resultado de read_inbox o search_emails)\n\n"
+            "FLUJO DE USO:\n"
+            "1. Escribe tu respuesta al usuario indicando que vas a consultar los emails\n"
+            "2. Incluye el bloque [IMAP_ACTION] al final\n"
+            "3. El SISTEMA ejecutará la acción y guardará los resultados en el historial\n"
+            "4. En tu SIGUIENTE respuesta verás los resultados en bloques [RESULTADO DE IMAP]...[/RESULTADO DE IMAP]\n"
+            "5. Usa esa información para responder al usuario con los datos reales\n\n"
+            "HISTORIAL DE RESULTADOS IMAP:\n"
+            "En el historial encontrarás bloques [RESULTADO DE IMAP]...[/RESULTADO DE IMAP] con:\n"
+            "  - [ID:N] De: remitente | Asunto: asunto | Fecha: fecha\n"
+            "  - Contenido: preview del cuerpo del email\n"
+            "Usa estos datos para responder al usuario con información real de sus correos.\n\n"
+            "REGLAS:\n"
+            "- NUNCA inventes emails ni remitentes que no estén en los resultados IMAP\n"
+            "- NUNCA generes bloques [RESULTADO DE IMAP] tú mismo, esos los genera el SISTEMA\n"
+            "- Solo puedes LEER emails, no enviarlos (para enviar usa EMAIL_ACTION)\n"
+            "- Si el usuario pide buscar Y enviar, primero busca con IMAP_ACTION, luego envía con EMAIL_ACTION\n"
+            "--- FIN CAPACIDAD IMAP ---"
+        )
+        messages[0]["content"] += imap_instructions
+
+    # Inyectar capacidad de Facturación Electrónica FEPA si está habilitado
+    if eff_use_fe:
+        fe_instructions = (
+            "\n\n--- CAPACIDAD DE FACTURACIÓN ELECTRÓNICA (FEPA) ---\n"
+            "Tienes acceso a la API de Facturación Electrónica FEPA. "
+            "TÚ NO CONOCES los datos de ninguna factura. TODA información de facturas viene exclusivamente "
+            "de la API. Nunca puedes responder con datos de una factura sin haber llamado primero a la API.\n\n"
+
+            "## REGLA INCONDICIONAL — CUÁNDO GENERAR [FE_ACTION]\n"
+            "SIEMPRE que el mensaje del usuario contenga un CUFE o un systemRef, "
+            "DEBES generar el bloque [FE_ACTION] DE INMEDIATO. SIN EXCEPCIÓN.\n"
+            "NO hagas preguntas. NO pidas confirmación. NO preguntes '¿qué deseas saber?'. "
+            "NO esperes más instrucciones. LLAMA A LA API PRIMERO, siempre.\n"
+            "Un CUFE es una cadena alfanumérica que comienza con 'FE' seguida de números y guiones. "
+            "Si la ves en el mensaje, actúa de inmediato sin importar nada más.\n\n"
+
+            "Qué herramienta usar:\n"
+            "- Mensaje contiene un CUFE (empieza con 'FE...') → getResultFe inmediatamente\n"
+            "- Mensaje contiene un systemRef → getCufeBySystemRef inmediatamente\n"
+            "- Usuario pide EXPLÍCITAMENTE el PDF → getPdf\n\n"
+
+            "## FORMATO OBLIGATORIO\n"
+            "Escribe SOLO una línea breve ('Voy a consultar la factura...') y luego el bloque:\n\n"
+            "[FE_ACTION]\n"
+            '{"tool": "nombreHerramienta", "param1": "valor1"}\n'
+            "[/FE_ACTION]\n\n"
+            "El bloque se llama EXACTAMENTE [FE_ACTION] y [/FE_ACTION]. Ningún otro nombre.\n\n"
+
+            "## HERRAMIENTAS DISPONIBLES (SOLO ESTAS 3)\n\n"
+            "1. getResultFe — Consultar factura por CUFE:\n"
+            '   {"tool": "getResultFe", "cufe": "<CUFE completo>"}\n\n'
+            "2. getCufeBySystemRef — Buscar factura por referencia interna:\n"
+            '   {"tool": "getCufeBySystemRef", "docType": "<tipo>", "systemRef": "<referencia>"}\n\n'
+            "3. getPdf — Obtener PDF (solo si el usuario lo pide explícitamente):\n"
+            '   {"tool": "getPdf", "cufe": "<CUFE completo>"}\n\n'
+
+            "## PROHIBICIONES ABSOLUTAS\n"
+            "- PROHIBIDO inventar o suponer datos, montos, fechas, estados o números de factura\n"
+            "- PROHIBIDO escribir 'RESULTADO DE FE', 'resultado de la consulta', ni ningún bloque "
+            "que imite resultados de la API. Solo el SISTEMA genera esos bloques\n"
+            "- PROHIBIDO responder con datos de una factura sin haber generado antes el [FE_ACTION]\n"
+            "- PROHIBIDO ofrecer el PDF si el usuario no lo pidió explícitamente\n"
+            "- PROHIBIDO acortar, truncar o resumir un CUFE. Cópialo carácter por carácter completo "
+            "(son cadenas de 60-100 caracteres)\n"
+            "- El JSON dentro de [FE_ACTION] debe ser válido: sin comentarios, sin texto extra\n"
+            "- La API NO devuelve datos del cliente ni detalle de productos. Si preguntan: "
+            "'La API FEPA no proporciona datos del cliente ni el detalle de productos.'\n\n"
+
+            "## CUÁNDO USAR LOS DATOS DE LA API\n"
+            "Solo cuando veas [RESULTADO DE FE] en el historial (lo genera el SISTEMA automáticamente), "
+            "úsalo como única fuente de verdad para responder al usuario.\n"
+            "--- FIN CAPACIDAD FEPA ---"
+        )
+        messages[0]["content"] += fe_instructions
 
     # Inyectar capacidad de gráficos si está habilitado
     if eff_use_charts:
@@ -871,6 +982,112 @@ async def chat(req: ChatRequest):
             traceback.print_exc()
     # ── END CALENDAR POST-PROCESSING ────────────────────────────────────
 
+    # ── IMAP POST-PROCESSING ──────────────────────────────────────────
+    imap_results = []
+    imap_executed = False
+
+    if imap_enabled:
+        try:
+            # Limpiar bloques [RESULTADO DE IMAP] falsos generados por el LLM
+            fake_imap_pattern = r'\[RESULTADO DE IMAP\].*?\[/RESULTADO DE IMAP\]'
+            answer = re.sub(fake_imap_pattern, '', answer, flags=re.DOTALL).strip()
+
+            imap_actions, cleaned_answer = parse_imap_actions(answer)
+            print(f"[IMAP DEBUG] Acciones parseadas: {len(imap_actions)}")
+
+            if imap_actions:
+                email_client = get_email_client()
+                imap_results = await execute_imap_actions(
+                    actions=imap_actions,
+                    imap_config=agent["imap_config"],
+                    imap_client=email_client,
+                )
+                imap_executed = any(r.get("success") for r in imap_results)
+                print(f"[IMAP DEBUG] Resultados: {imap_executed}")
+                answer = cleaned_answer
+        except Exception as e:
+            print(f"[IMAP ERROR] Error en post-procesamiento IMAP: {e}")
+            import traceback
+            traceback.print_exc()
+    # ── END IMAP POST-PROCESSING ──────────────────────────────────────
+
+    # ── FE POST-PROCESSING ───────────────────────────────────────────
+    fe_results = []
+    fe_executed = False
+
+    if eff_use_fe:
+        try:
+            fake_fe_pattern = r'\[RESULTADO DE FE\].*?(?:\[/RESULTADO DE FE\]|$)'
+            answer = re.sub(fake_fe_pattern, '', answer, flags=re.DOTALL).strip()
+
+            fe_actions, cleaned_answer = parse_fe_actions(answer)
+            print(f"[FE DEBUG] Acciones parseadas: {len(fe_actions)}")
+
+            if fe_actions:
+                fe_client = get_fe_client()
+                fe_results = await execute_fe_actions(
+                    actions=fe_actions,
+                    fe_client=fe_client,
+                )
+                fe_executed = any(r.get("success") for r in fe_results)
+                print(f"[FE DEBUG] Resultados: {fe_results}")
+
+                if fe_executed:
+                    # Segunda llamada al LLM con los datos reales de la API.
+                    # Se usa SOLO el system prompt original + pregunta del usuario + datos reales
+                    # para evitar que el LLM se ancle a los datos inventados de cleaned_answer.
+                    _HEAVY_FIELDS = {"xml", "pdf", "qr", "qrCode", "qrImage", "base64"}
+                    fe_data_lines = []
+                    for r in fe_results:
+                        if r.get("success"):
+                            data_for_llm = {
+                                k: v for k, v in r.get("data", {}).items()
+                                if k not in _HEAVY_FIELDS
+                            }
+                            fe_data_lines.append(
+                                json.dumps(data_for_llm, ensure_ascii=False, indent=2)
+                            )
+                    fe_real_data = "\n\n".join(fe_data_lines)
+
+                    # Segunda llamada: system prompt mínimo y enfocado solo en presentar datos.
+                    # NO hereda el prompt del agente para evitar que el modelo entre en
+                    # "modo presentación de capacidades" en lugar de mostrar los datos reales.
+                    second_system = (
+                        "Eres un asistente que presenta resultados de facturas electrónicas. "
+                        "Responde siempre en español.\n\n"
+                        "DATOS REALES de la factura consultada en la API FEPA:\n\n"
+                        f"{fe_real_data}\n\n"
+                        "TU ÚNICA TAREA: interpretar los datos anteriores y responderle al usuario "
+                        "de forma clara y en lenguaje natural.\n\n"
+                        "REGLAS:\n"
+                        "- Usa SOLO los datos del JSON. No inventes nada.\n"
+                        "- NO generes [FE_ACTION] ni ningún bloque de acción.\n"
+                        "- NO muestres el JSON crudo.\n"
+                        "- NO ofrezcas servicios adicionales (PDF, email, etc.) que el usuario no pidió.\n"
+                        "- NO expliques tus capacidades ni lo que puedes hacer.\n"
+                        "- Responde directamente la pregunta del usuario con los datos obtenidos."
+                    )
+
+                    second_messages = [
+                        {"role": "system", "content": second_system},
+                        {"role": "user", "content": req.message},
+                    ]
+                    try:
+                        answer = ollama_chat(second_messages, temperature=eff_temperature, model=agent_model)
+                        # Limpiar si el LLM echó el bloque [RESULTADO DE FE] en su respuesta
+                        answer = re.sub(fake_fe_pattern, '', answer, flags=re.DOTALL).strip()
+                        print(f"[FE DEBUG] Segunda llamada LLM OK, respuesta: {answer[:300]}")
+                    except Exception as e:
+                        print(f"[FE ERROR] Error en segunda llamada LLM: {e}")
+                        answer = cleaned_answer
+                else:
+                    answer = cleaned_answer
+        except Exception as e:
+            print(f"[FE ERROR] Error en post-procesamiento FE: {e}")
+            import traceback
+            traceback.print_exc()
+    # ── END FE POST-PROCESSING ────────────────────────────────────────
+
     # ── COTIZACION POST-PROCESSING ─────────────────────────────────────
     cotizacion_actions = []
     _has_alerts = agent.get("alert_wa_number") or agent.get("alert_email")
@@ -981,6 +1198,24 @@ async def chat(req: ChatRequest):
                 lines.append(f"  - FALLÓ {action_type}: {r.get('error', 'desconocido')}")
         calendar_summary = "[RESULTADO DE CALENDARIO]\n" + "\n".join(lines) + "\n[/RESULTADO DE CALENDARIO]"
 
+    # Construir resumen IMAP para inyectar en el historial
+    imap_summary = ""
+    if imap_results:
+        imap_summary = format_imap_results_for_history(imap_results)
+
+    # Construir resumen FE para inyectar en el historial
+    fe_summary = ""
+    if fe_results:
+        lines = []
+        for r in fe_results:
+            if r.get("success"):
+                import json as _json
+                data_str = _json.dumps(r.get("data", {}), ensure_ascii=False, indent=2)
+                lines.append(f"  - {r.get('tool')}: OK\n{data_str}")
+            else:
+                lines.append(f"  - {r.get('tool', '?')}: FALLÓ → {r.get('error', 'desconocido')}")
+        fe_summary = "[RESULTADO DE FE]\n" + "\n".join(lines) + "\n[/RESULTADO DE FE]"
+
     # Construir resumen de cotización para inyectar en el historial
     cotizacion_summary = ""
     if cotizacion_actions:
@@ -1011,10 +1246,14 @@ async def chat(req: ChatRequest):
     answer_to_save = answer
     if email_summary:
         answer_to_save = f"{answer_to_save}\n\n{email_summary}"
+    if imap_summary:
+        answer_to_save = f"{answer_to_save}\n\n{imap_summary}"
     if calendar_summary:
         answer_to_save = f"{answer_to_save}\n\n{calendar_summary}"
     if cotizacion_summary:
         answer_to_save = f"{answer_to_save}\n\n{cotizacion_summary}"
+    if fe_summary:
+        answer_to_save = f"{answer_to_save}\n\n{fe_summary}"
     if alert_summary:
         answer_to_save = f"{answer_to_save}\n\n{alert_summary}"
     save_message(req.agent_id, req.session_id, "assistant", answer_to_save, charts=charts if charts else None)
@@ -1058,6 +1297,12 @@ async def chat(req: ChatRequest):
         except Exception as e:
             print(f"Error logging email to SQLite: {e}")
 
+    # Limpiar bloques de acción que hayan escapado al parseo o lleguen malformados
+    # Cubre: [FE_ACTION], FE_ACTION (sin corchete), [PDF ACTION], [CHART ACTION], etc.
+    answer = re.sub(r'\[?FE_ACTION\]?.*?\[/FE_ACTION\]', '', answer, flags=re.DOTALL)
+    answer = re.sub(r'\[[A-Z][A-Z_ ]*ACTION\].*?\[/[A-Z][A-Z_ ]*ACTION\]', '', answer, flags=re.DOTALL)
+    answer = re.sub(r'\n{3,}', '\n\n', answer).strip()
+
     return {
         "answer": answer,
         "sources": snippets,
@@ -1074,6 +1319,10 @@ async def chat(req: ChatRequest):
         "charts_count": len(charts),
         "calendar_executed": calendar_executed,
         "calendar_results": calendar_results,
+        "imap_executed": imap_executed,
+        "imap_results": imap_results,
         "cotizacion_count": len([c for c in cotizacion_actions if "_parse_error" not in c]),
+        "fe_executed": fe_executed,
+        "fe_results": fe_results,
         "alert_results": alert_results,
     }

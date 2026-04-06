@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
 from .agents import create_default_agent
 from .utils.json_sanitize import SanitizeJSONMiddleware
-from .routers import health, agents, chat, sessions, documents, chromadb, ollama, mcp_sqlite, mysql, ibm, autopart, email, orchestrator, supervisor, google_calendar, whatsapp
+from .routers import health, agents, chat, sessions, documents, chromadb, ollama, mcp_sqlite, mysql, ibm, autopart, email, orchestrator, supervisor, google_calendar, whatsapp, organizations
 
 
 # Metadata para Swagger UI
@@ -133,6 +133,7 @@ app.add_middleware(
 
 # Routers
 app.include_router(health.router)
+app.include_router(organizations.router)
 app.include_router(agents.router)
 app.include_router(chat.router)
 app.include_router(sessions.router)

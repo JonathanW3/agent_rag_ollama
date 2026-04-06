@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
+from ..auth import get_current_org, OrgContext
 from ..agents import agent_exists
 from ..rag.store import (
     list_collections, get_collection_info, peek_collection, get_all_documents,
@@ -13,7 +14,7 @@ router = APIRouter()
 # ============================================================================
 
 @router.get("/chromadb/agents", tags=["🗄️ ChromaDB - Agentes"], summary="Listar colecciones de agentes")
-def get_agent_collections_endpoint():
+def get_agent_collections_endpoint(org: OrgContext = Depends(get_current_org)):
     """Lista todas las colecciones de agentes con información de documentos y embeddings."""
     try:
         collections = get_agent_collections()
@@ -29,7 +30,7 @@ def get_agent_collections_endpoint():
 
 
 @router.get("/chromadb/agents/{agent_id}", tags=["🗄️ ChromaDB - Agentes"], summary="Info de colección del agente")
-def get_agent_collection_info(agent_id: str):
+def get_agent_collection_info(agent_id: str, org: OrgContext = Depends(get_current_org)):
     """Obtiene información de la colección ChromaDB de un agente específico."""
     if not agent_exists(agent_id):
         raise HTTPException(status_code=404, detail=f"Agente '{agent_id}' no encontrado")
@@ -42,7 +43,7 @@ def get_agent_collection_info(agent_id: str):
 
 
 @router.get("/chromadb/agents/{agent_id}/documents", tags=["🗄️ ChromaDB - Agentes"], summary="Documentos del agente")
-def get_agent_documents(agent_id: str):
+def get_agent_documents(agent_id: str, org: OrgContext = Depends(get_current_org)):
     """Obtiene todos los documentos/chunks embebidos de la base de conocimientos del agente."""
     if not agent_exists(agent_id):
         raise HTTPException(status_code=404, detail=f"Agente '{agent_id}' no encontrado")
@@ -59,7 +60,7 @@ def get_agent_documents(agent_id: str):
 
 
 @router.delete("/chromadb/agents/{agent_id}", tags=["🗄️ ChromaDB - Agentes"], summary="Eliminar documentos del agente")
-def clear_agent_documents(agent_id: str):
+def clear_agent_documents(agent_id: str, org: OrgContext = Depends(get_current_org)):
     """Elimina todos los documentos de la base de conocimientos de un agente sin eliminar el agente."""
     if not agent_exists(agent_id):
         raise HTTPException(status_code=404, detail=f"Agente '{agent_id}' no encontrado")
@@ -80,7 +81,7 @@ def clear_agent_documents(agent_id: str):
 # ============================================================================
 
 @router.get("/chromadb/collections", tags=["🗂️ ChromaDB - General"], summary="Listar todas las colecciones")
-def get_collections():
+def get_collections(org: OrgContext = Depends(get_current_org)):
     """Lista todas las colecciones en ChromaDB (incluye sistema y agentes)."""
     try:
         collections = list_collections()
@@ -97,7 +98,7 @@ def get_collections():
 
 
 @router.get("/chromadb/collections/{collection_name}", tags=["🗂️ ChromaDB - General"], summary="Detalles de colección")
-def get_collection_details(collection_name: str):
+def get_collection_details(collection_name: str, org: OrgContext = Depends(get_current_org)):
     """Obtiene información detallada de una colección específica de ChromaDB."""
     try:
         return get_collection_info(collection_name)
@@ -108,7 +109,8 @@ def get_collection_details(collection_name: str):
 @router.get("/chromadb/collections/{collection_name}/peek", tags=["🗂️ ChromaDB - General"], summary="Vista previa de documentos")
 def peek_collection_data(
     collection_name: str,
-    limit: int = Query(default=10, ge=1, le=100, description="Número de documentos a mostrar")
+    limit: int = Query(default=10, ge=1, le=100, description="Número de documentos a mostrar"),
+    org: OrgContext = Depends(get_current_org),
 ):
     """Muestra los primeros N documentos de una colección para exploración rápida."""
     try:
@@ -118,7 +120,7 @@ def peek_collection_data(
 
 
 @router.get("/chromadb/collections/{collection_name}/documents", tags=["🗂️ ChromaDB - General"], summary="Todos los documentos")
-def get_collection_documents(collection_name: str):
+def get_collection_documents(collection_name: str, org: OrgContext = Depends(get_current_org)):
     """Obtiene todos los documentos de una colección específica (usar con precaución en colecciones grandes)."""
     try:
         return get_all_documents(collection_name)
@@ -127,7 +129,7 @@ def get_collection_documents(collection_name: str):
 
 
 @router.delete("/chromadb/collections/{collection_name}", tags=["🗂️ ChromaDB - General"], summary="Eliminar colección")
-def remove_collection(collection_name: str):
+def remove_collection(collection_name: str, org: OrgContext = Depends(get_current_org)):
     """Elimina una colección completa de ChromaDB (no permite kb_store por seguridad)."""
     if collection_name == "kb_store":
         raise HTTPException(
@@ -141,7 +143,7 @@ def remove_collection(collection_name: str):
 
 
 @router.post("/chromadb/clear", tags=["🗂️ ChromaDB - General"], summary="Vaciar colección principal")
-def clear_chromadb():
+def clear_chromadb(org: OrgContext = Depends(get_current_org)):
     """Vacía todos los documentos de la colección principal (legacy kb_store)."""
     try:
         delete_collection("kb_store")

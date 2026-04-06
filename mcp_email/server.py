@@ -14,6 +14,7 @@ from mcp.types import (
     ListToolsResult,
 )
 from .smtp_sender import SMTPSender
+from .imap_reader import IMAPReader
 
 
 class EmailMCPServer:
@@ -22,6 +23,7 @@ class EmailMCPServer:
     def __init__(self):
         self.server = Server("email-mcp-server")
         self.smtp_sender = SMTPSender()
+        self.imap_reader = IMAPReader()
         self._register_handlers()
     
     def _register_handlers(self):
@@ -109,6 +111,96 @@ class EmailMCPServer:
                             "type": "object",
                             "properties": {}
                         }
+                    ),
+                    Tool(
+                        name="read_inbox",
+                        description="Lee los últimos N emails de la bandeja de entrada mediante IMAP. "
+                                    "Requiere imap_config con server, port, email y password.",
+                        inputSchema={
+                            "type": "object",
+                            "properties": {
+                                "imap_config": {
+                                    "type": "object",
+                                    "description": "Configuración del servidor IMAP",
+                                    "properties": {
+                                        "server": {"type": "string", "description": "Servidor IMAP (ej: imap.gmail.com)"},
+                                        "port": {"type": "integer", "description": "Puerto IMAP (993 para SSL)"},
+                                        "email": {"type": "string", "description": "Email de la cuenta"},
+                                        "password": {"type": "string", "description": "Password o App Password"}
+                                    },
+                                    "required": ["server", "port", "email", "password"]
+                                },
+                                "limit": {
+                                    "type": "integer",
+                                    "description": "Número máximo de emails a retornar (default: 10)",
+                                    "default": 10
+                                },
+                                "folder": {
+                                    "type": "string",
+                                    "description": "Carpeta IMAP a leer (default: INBOX)",
+                                    "default": "INBOX"
+                                }
+                            },
+                            "required": ["imap_config"]
+                        }
+                    ),
+                    Tool(
+                        name="search_emails",
+                        description="Busca emails en la bandeja según criterios: remitente, asunto, fecha, palabra clave o no leídos.",
+                        inputSchema={
+                            "type": "object",
+                            "properties": {
+                                "imap_config": {
+                                    "type": "object",
+                                    "description": "Configuración del servidor IMAP",
+                                    "properties": {
+                                        "server": {"type": "string"},
+                                        "port": {"type": "integer"},
+                                        "email": {"type": "string"},
+                                        "password": {"type": "string"}
+                                    },
+                                    "required": ["server", "port", "email", "password"]
+                                },
+                                "from_addr": {"type": "string", "description": "Filtrar por remitente (ej: juan@example.com)"},
+                                "subject": {"type": "string", "description": "Filtrar por asunto"},
+                                "since_date": {"type": "string", "description": "Desde fecha (formato YYYY-MM-DD)"},
+                                "keyword": {"type": "string", "description": "Palabra clave en el cuerpo"},
+                                "unseen_only": {"type": "boolean", "description": "Solo emails no leídos", "default": False},
+                                "limit": {"type": "integer", "description": "Número máximo de resultados", "default": 10},
+                                "folder": {"type": "string", "description": "Carpeta IMAP", "default": "INBOX"}
+                            },
+                            "required": ["imap_config"]
+                        }
+                    ),
+                    Tool(
+                        name="read_email",
+                        description="Lee el contenido completo de un email por su ID IMAP (obtenido de read_inbox o search_emails).",
+                        inputSchema={
+                            "type": "object",
+                            "properties": {
+                                "imap_config": {
+                                    "type": "object",
+                                    "description": "Configuración del servidor IMAP",
+                                    "properties": {
+                                        "server": {"type": "string"},
+                                        "port": {"type": "integer"},
+                                        "email": {"type": "string"},
+                                        "password": {"type": "string"}
+                                    },
+                                    "required": ["server", "port", "email", "password"]
+                                },
+                                "email_id": {
+                                    "type": "string",
+                                    "description": "ID del email a leer"
+                                },
+                                "folder": {
+                                    "type": "string",
+                                    "description": "Carpeta donde está el email",
+                                    "default": "INBOX"
+                                }
+                            },
+                            "required": ["imap_config", "email_id"]
+                        }
                     )
                 ]
             )
@@ -123,6 +215,12 @@ class EmailMCPServer:
                     result = await self._validate_email(arguments)
                 elif name == "list_providers":
                     result = await self._list_providers()
+                elif name == "read_inbox":
+                    result = await self._read_inbox(arguments)
+                elif name == "search_emails":
+                    result = await self._search_emails(arguments)
+                elif name == "read_email":
+                    result = await self._read_email(arguments)
                 else:
                     result = {"error": f"Herramienta desconocida: {name}"}
                 
@@ -177,12 +275,41 @@ class EmailMCPServer:
     async def _list_providers(self) -> Dict[str, Any]:
         """Lista los proveedores SMTP predefinidos."""
         from .smtp_sender import SMTP_PROVIDERS
-        
+
         return {
             "success": True,
             "providers": SMTP_PROVIDERS
         }
-    
+
+    async def _read_inbox(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """Lee los últimos N emails de la bandeja de entrada."""
+        return await self.imap_reader.read_inbox(
+            imap_config=arguments.get("imap_config"),
+            limit=arguments.get("limit", 10),
+            folder=arguments.get("folder", "INBOX"),
+        )
+
+    async def _search_emails(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """Busca emails según criterios."""
+        return await self.imap_reader.search_emails(
+            imap_config=arguments.get("imap_config"),
+            from_addr=arguments.get("from_addr"),
+            subject=arguments.get("subject"),
+            since_date=arguments.get("since_date"),
+            keyword=arguments.get("keyword"),
+            unseen_only=arguments.get("unseen_only", False),
+            limit=arguments.get("limit", 10),
+            folder=arguments.get("folder", "INBOX"),
+        )
+
+    async def _read_email(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """Lee el contenido completo de un email por ID."""
+        return await self.imap_reader.read_email(
+            imap_config=arguments.get("imap_config"),
+            email_id=str(arguments.get("email_id", "")),
+            folder=arguments.get("folder", "INBOX"),
+        )
+
     def get_server(self) -> Server:
         """Retorna la instancia del servidor MCP."""
         return self.server

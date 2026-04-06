@@ -1,6 +1,7 @@
 import json
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse
+from ..auth import get_current_org, OrgContext
 from ..config import settings, set_chat_model, set_embed_model
 from ..schemas import ModelSelectRequest, ModelDownloadRequest
 from ..ollama_client import ollama_list_models, ollama_pull_model, ollama_show_model
@@ -9,7 +10,7 @@ router = APIRouter(prefix="/ollama", tags=["🔧 Ollama"])
 
 
 @router.get("/models", summary="Listar modelos disponibles")
-def list_ollama_models():
+def list_ollama_models(org: OrgContext = Depends(get_current_org)):
     """Lista todos los modelos LLM disponibles en Ollama instalados localmente.
 
     Ejecuta internamente el comando `ollama list` y devuelve información detallada
@@ -45,7 +46,7 @@ def list_ollama_models():
 
 
 @router.get("/models/current", summary="Ver modelos activos")
-def get_current_models():
+def get_current_models(org: OrgContext = Depends(get_current_org)):
     """Obtiene los modelos actualmente en uso para chat y embeddings."""
     return {
         "status": "ok",
@@ -56,7 +57,7 @@ def get_current_models():
 
 
 @router.post("/models/select", summary="Cambiar modelo activo")
-def select_model(request: ModelSelectRequest):
+def select_model(request: ModelSelectRequest, org: OrgContext = Depends(get_current_org)):
     """Cambia el modelo LLM activo en runtime.
 
     Permite cambiar entre modelos ya descargados sin reiniciar el servidor.
@@ -113,7 +114,7 @@ def select_model(request: ModelSelectRequest):
 
 
 @router.post("/models/download", summary="Descargar nuevo modelo")
-def download_model(request: ModelDownloadRequest):
+def download_model(request: ModelDownloadRequest, org: OrgContext = Depends(get_current_org)):
     """Descarga un nuevo modelo de Ollama.
 
     Ejecuta internamente `ollama pull <modelo>` en streaming.
@@ -161,7 +162,7 @@ def download_model(request: ModelDownloadRequest):
 
 
 @router.get("/models/{model_name}", summary="Información de modelo")
-def get_model_info(model_name: str):
+def get_model_info(model_name: str, org: OrgContext = Depends(get_current_org)):
     """Obtiene información detallada de un modelo específico."""
     try:
         info = ollama_show_model(model_name)

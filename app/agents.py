@@ -30,7 +30,28 @@ def _decrypt_agent_smtp(agent: dict) -> dict:
     return agent
 
 
-def create_agent(name: str, prompt: str, description: str = "", agent_id: str = None, organization: str = None, llm_model: str = None, sqlite_db_path: str = None, use_rag: bool = True, smtp_config: dict = None, use_mysql: bool = False, use_email: bool = False, use_charts: bool = False, use_calendar: bool = False, use_ibm: bool = False, use_autopart: bool = False, top_k: int = 4, temperature: float = 0.7, alert_wa_session_id: str = None, alert_wa_number: str = None, alert_email: str = None) -> dict:
+def _encrypt_agent_imap(agent: dict) -> dict:
+    """Cifra imap_config antes de guardar en Redis. Retorna copia modificada."""
+    if agent.get("imap_config") and isinstance(agent["imap_config"], dict):
+        agent = dict(agent)
+        agent["imap_config_encrypted"] = encrypt_dict(agent["imap_config"])
+        agent["imap_config"] = None  # No guardar en texto plano
+    return agent
+
+
+def _decrypt_agent_imap(agent: dict) -> dict:
+    """Descifra imap_config al leer de Redis. Retorna copia modificada."""
+    if agent.get("imap_config_encrypted"):
+        agent = dict(agent)
+        try:
+            agent["imap_config"] = decrypt_dict(agent["imap_config_encrypted"])
+        except Exception:
+            agent["imap_config"] = None  # Clave cambió o dato corrupto
+        del agent["imap_config_encrypted"]
+    return agent
+
+
+def create_agent(name: str, prompt: str, description: str = "", agent_id: str = None, organization: str = None, llm_model: str = None, sqlite_db_path: str = None, use_rag: bool = True, smtp_config: dict = None, use_mysql: bool = False, use_email: bool = False, use_charts: bool = False, use_calendar: bool = False, use_ibm: bool = False, use_autopart: bool = False, imap_config: dict = None, use_imap: bool = False, use_fe: bool = False, top_k: int = 4, temperature: float = 0.7, alert_wa_session_id: str = None, alert_wa_number: str = None, alert_email: str = None) -> dict:
     """Crea un nuevo agente."""
     client = get_redis_client()
 
@@ -59,6 +80,9 @@ def create_agent(name: str, prompt: str, description: str = "", agent_id: str = 
         "use_calendar": use_calendar,
         "use_ibm": use_ibm,
         "use_autopart": use_autopart,
+        "imap_config": imap_config,
+        "use_imap": use_imap,
+        "use_fe": use_fe,
         "top_k": top_k,
         "temperature": temperature,
         "alert_wa_session_id": alert_wa_session_id,
@@ -68,8 +92,9 @@ def create_agent(name: str, prompt: str, description: str = "", agent_id: str = 
         "updated_at": now
     }
 
-    # Cifrar SMTP antes de almacenar
+    # Cifrar SMTP e IMAP antes de almacenar
     to_store = _encrypt_agent_smtp(agent)
+    to_store = _encrypt_agent_imap(to_store)
     client.set(key, json.dumps(to_store))
     return agent
 
@@ -83,7 +108,8 @@ def get_agent(agent_id: str) -> dict | None:
         return None
 
     agent = json.loads(data)
-    return _decrypt_agent_smtp(agent)
+    agent = _decrypt_agent_smtp(agent)
+    return _decrypt_agent_imap(agent)
 
 def list_agents(organization: str = None) -> list[dict]:
     """Lista agentes. Si se pasa organization, filtra por esa organización."""
@@ -95,6 +121,7 @@ def list_agents(organization: str = None) -> list[dict]:
         if data:
             agent = json.loads(data)
             agent = _decrypt_agent_smtp(agent)
+            agent = _decrypt_agent_imap(agent)
             if organization is not None:
                 if agent.get("organization", "").lower() == organization.lower():
                     agents.append(agent)
@@ -124,7 +151,7 @@ def list_organizations() -> list[dict]:
         for name, count in sorted(org_counts.items())
     ]
 
-def update_agent(agent_id: str, name: str = None, prompt: str = None, description: str = None, organization: str = None, llm_model: str = None, sqlite_db_path: str = None, use_rag: bool = None, smtp_config: dict = None, use_mysql: bool = None, use_email: bool = None, use_charts: bool = None, use_calendar: bool = None, use_ibm: bool = None, use_autopart: bool = None, top_k: int = None, temperature: float = None, alert_wa_session_id: str = None, alert_wa_number: str = None, alert_email: str = None) -> dict:
+def update_agent(agent_id: str, name: str = None, prompt: str = None, description: str = None, organization: str = None, llm_model: str = None, sqlite_db_path: str = None, use_rag: bool = None, smtp_config: dict = None, use_mysql: bool = None, use_email: bool = None, use_charts: bool = None, use_calendar: bool = None, use_ibm: bool = None, use_autopart: bool = None, imap_config: dict = None, use_imap: bool = None, use_fe: bool = None, top_k: int = None, temperature: float = None, alert_wa_session_id: str = None, alert_wa_number: str = None, alert_email: str = None) -> dict:
     """Actualiza un agente existente."""
     client = get_redis_client()
     key = get_agent_key(agent_id)
@@ -163,6 +190,12 @@ def update_agent(agent_id: str, name: str = None, prompt: str = None, descriptio
         agent["use_ibm"] = use_ibm
     if use_autopart is not None:
         agent["use_autopart"] = use_autopart
+    if imap_config is not None:
+        agent["imap_config"] = imap_config
+    if use_imap is not None:
+        agent["use_imap"] = use_imap
+    if use_fe is not None:
+        agent["use_fe"] = use_fe
     if top_k is not None:
         agent["top_k"] = top_k
     if temperature is not None:
@@ -176,8 +209,9 @@ def update_agent(agent_id: str, name: str = None, prompt: str = None, descriptio
 
     agent["updated_at"] = datetime.now(timezone.utc).isoformat()
 
-    # Cifrar SMTP antes de almacenar
+    # Cifrar SMTP e IMAP antes de almacenar
     to_store = _encrypt_agent_smtp(agent)
+    to_store = _encrypt_agent_imap(to_store)
     client.set(key, json.dumps(to_store))
     return agent
 

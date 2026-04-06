@@ -10,7 +10,7 @@ def parse_calendar_actions(text: str) -> tuple[list[dict], str]:
     Returns:
         Tupla de (lista de acciones calendar, texto limpio sin bloques).
     """
-    pattern = r'\[CALENDAR_ACTION\](.*?)\[/CALENDAR_ACTION\]'
+    pattern = r'\*{0,2}\[CALENDAR_ACTION\]\*{0,2}(.*?)\*{0,2}\[/CALENDAR_ACTION\]\*{0,2}'
     actions: list[dict] = []
 
     for match in re.finditer(pattern, text, re.DOTALL):

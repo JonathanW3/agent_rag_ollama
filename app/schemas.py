@@ -20,6 +20,8 @@ class ChatRequest(BaseModel):
     use_calendar: bool | None = Field(default=None, description="Habilitar Google Calendar (None=usar config del agente)")
     use_ibm: bool | None = Field(default=None, description="Habilitar consultas MySQL IBM (None=usar config del agente)")
     use_autopart: bool | None = Field(default=None, description="Habilitar consultas MySQL Autopart (None=usar config del agente)")
+    use_imap: bool | None = Field(default=None, description="Habilitar lectura de emails por IMAP (None=usar config del agente)")
+    use_fe: bool | None = Field(default=None, description="Habilitar Facturación Electrónica FEPA (None=usar config del agente)")
 
 
 class AgentCreate(BaseModel):
@@ -39,12 +41,20 @@ class AgentCreate(BaseModel):
         "password": "app_password",
         "use_tls": True
     })
+    imap_config: dict | None = Field(default=None, description="Configuración IMAP para lectura de emails", example={
+        "server": "imap.gmail.com",
+        "port": 993,
+        "email": "bot@gmail.com",
+        "password": "app_password"
+    })
     use_mysql: bool = Field(default=False, description="Habilitar consultas MySQL (farmacia_db) por defecto para este agente")
     use_email: bool = Field(default=False, description="Habilitar envío de emails por defecto para este agente (requiere smtp_config)")
+    use_imap: bool = Field(default=False, description="Habilitar lectura de emails IMAP por defecto para este agente (requiere imap_config)")
     use_charts: bool = Field(default=False, description="Habilitar gráficos Plotly por defecto para este agente")
     use_calendar: bool = Field(default=False, description="Habilitar Google Calendar por defecto para este agente")
     use_ibm: bool = Field(default=False, description="Habilitar consultas MySQL IBM (credit_cards, employees, sales_orders, etc.) por defecto")
     use_autopart: bool = Field(default=False, description="Habilitar consultas MySQL Autopart (vehicles, applications, compatibility, etc.) por defecto")
+    use_fe: bool = Field(default=False, description="Habilitar Facturación Electrónica FEPA por defecto para este agente")
     top_k: int = Field(default=4, ge=1, le=100, description="Número de documentos RAG a recuperar por defecto")
     temperature: float = Field(default=0.7, ge=0.0, le=2.0, description="Temperatura del modelo por defecto")
     alert_wa_session_id: str | None = Field(default=None, description="ID de sesión WhatsApp para enviar alertas internas", example="miempresawhts")
@@ -68,6 +78,9 @@ class AgentUpdate(BaseModel):
     use_calendar: bool | None = Field(default=None, description="Habilitar/deshabilitar Google Calendar para este agente")
     use_ibm: bool | None = Field(default=None, description="Habilitar/deshabilitar MySQL IBM para este agente")
     use_autopart: bool | None = Field(default=None, description="Habilitar/deshabilitar MySQL Autopart para este agente")
+    imap_config: dict | None = Field(default=None, description="Configuración IMAP para lectura de emails")
+    use_imap: bool | None = Field(default=None, description="Habilitar/deshabilitar lectura IMAP para este agente")
+    use_fe: bool | None = Field(default=None, description="Habilitar/deshabilitar Facturación Electrónica FEPA para este agente")
     top_k: int | None = Field(default=None, ge=1, le=100, description="Número de documentos RAG a recuperar por defecto")
     temperature: float | None = Field(default=None, ge=0.0, le=2.0, description="Temperatura del modelo por defecto")
     alert_wa_session_id: str | None = Field(default=None, description="ID de sesión WhatsApp para alertas internas")
@@ -153,6 +166,8 @@ class OrchestratorChatRequest(BaseModel):
     use_calendar: bool | None = Field(default=None, description="Habilitar Google Calendar (None=usar config del agente)")
     use_ibm: bool | None = Field(default=None, description="Habilitar MySQL IBM (None=usar config del agente)")
     use_autopart: bool | None = Field(default=None, description="Habilitar MySQL Autopart (None=usar config del agente)")
+    use_imap: bool | None = Field(default=None, description="Habilitar lectura IMAP (None=usar config del agente)")
+    use_fe: bool | None = Field(default=None, description="Habilitar Facturación Electrónica FEPA (None=usar config del agente)")
 
 
 class OrchestratorConfigRequest(BaseModel):

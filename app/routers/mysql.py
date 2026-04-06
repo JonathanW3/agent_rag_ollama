@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
+from ..auth import get_current_org, OrgContext
 from ..schemas import MySQLQueryRequest
 from mcp_mysql.client import get_mysql_client
 
@@ -6,7 +7,7 @@ router = APIRouter(prefix="/mysql", tags=["🏥 MySQL Farmacia"])
 
 
 @router.get("/schema", summary="Esquema de farmacia_db")
-async def mysql_schema():
+async def mysql_schema(org: OrgContext = Depends(get_current_org)):
     """Retorna el esquema completo de farmacia_db (tablas y columnas)."""
     try:
         client = get_mysql_client()
@@ -16,7 +17,7 @@ async def mysql_schema():
 
 
 @router.post("/query", summary="Consulta SELECT libre")
-async def mysql_query(request: MySQLQueryRequest):
+async def mysql_query(request: MySQLQueryRequest, org: OrgContext = Depends(get_current_org)):
     """Ejecuta cualquier SELECT en farmacia_db. Solo lectura."""
     try:
         client = get_mysql_client()
@@ -30,7 +31,8 @@ async def mysql_buscar_medicamento(
     nombre: str = Query(default="", description="Nombre o parte del nombre"),
     laboratorio: str = Query(default="", description="Laboratorio"),
     clase: str = Query(default="", description="Clase terapéutica"),
-    limit: int = Query(default=20, ge=1, le=200)
+    limit: int = Query(default=20, ge=1, le=200),
+    org: OrgContext = Depends(get_current_org),
 ):
     """Busca medicamentos por nombre, laboratorio o clase terapéutica."""
     try:
@@ -44,7 +46,8 @@ async def mysql_buscar_medicamento(
 async def mysql_verificar_stock(
     medicamento: str = Query(..., description="Nombre o parte del medicamento"),
     local_id: int = Query(default=None, description="ID del local (opcional)"),
-    solo_disponibles: bool = Query(default=False, description="Excluir SIN STOCK")
+    solo_disponibles: bool = Query(default=False, description="Excluir SIN STOCK"),
+    org: OrgContext = Depends(get_current_org),
 ):
     """Consulta el stock de un medicamento en todas o una farmacia."""
     try:
@@ -58,7 +61,8 @@ async def mysql_verificar_stock(
 async def mysql_alertas_stock(
     local_id: int = Query(default=None, description="Filtrar por local (opcional)"),
     tipo: str = Query(default="TODOS", description="STOCK BAJO | SIN STOCK | TODOS"),
-    limit: int = Query(default=50, ge=1, le=500)
+    limit: int = Query(default=50, ge=1, le=500),
+    org: OrgContext = Depends(get_current_org),
 ):
     """Lista todos los registros con STOCK BAJO o SIN STOCK."""
     try:
@@ -75,7 +79,8 @@ async def mysql_historial_ventas(
     fecha_desde: str = Query(default="", description="YYYY-MM-DD"),
     fecha_hasta: str = Query(default="", description="YYYY-MM-DD"),
     metodo_pago: str = Query(default="", description="Método de pago"),
-    limit: int = Query(default=50, ge=1, le=500)
+    limit: int = Query(default=50, ge=1, le=500),
+    org: OrgContext = Depends(get_current_org),
 ):
     """Consulta el historial de compras con filtros opcionales."""
     try:
@@ -91,7 +96,8 @@ async def mysql_top_medicamentos(
     fecha_desde: str = Query(default="", description="YYYY-MM-DD"),
     fecha_hasta: str = Query(default="", description="YYYY-MM-DD"),
     ordenar_por: str = Query(default="cantidad", description="cantidad | ingresos"),
-    limit: int = Query(default=10, ge=1, le=100)
+    limit: int = Query(default=10, ge=1, le=100),
+    org: OrgContext = Depends(get_current_org),
 ):
     """Ranking de medicamentos por cantidad vendida o ingresos generados."""
     try:
@@ -103,7 +109,8 @@ async def mysql_top_medicamentos(
 
 @router.get("/farmacias/resumen", summary="Resumen KPIs por farmacia")
 async def mysql_resumen_farmacia(
-    local_id: int = Query(default=None, description="ID del local (opcional, si se omite retorna todos)")
+    local_id: int = Query(default=None, description="ID del local (opcional, si se omite retorna todos)"),
+    org: OrgContext = Depends(get_current_org),
 ):
     """KPIs por farmacia: ventas totales, ingresos, alertas de stock activas."""
     try:
@@ -119,7 +126,8 @@ async def mysql_buscar_usuario(
     condicion: str = Query(default="", description="Condición crónica"),
     plan_salud: str = Query(default="", description="Plan de salud"),
     tipo_cliente: str = Query(default="", description="Tipo de cliente"),
-    limit: int = Query(default=20, ge=1, le=200)
+    limit: int = Query(default=20, ge=1, le=200),
+    org: OrgContext = Depends(get_current_org),
 ):
     """Busca clientes/usuarios en farmacia_db."""
     try:

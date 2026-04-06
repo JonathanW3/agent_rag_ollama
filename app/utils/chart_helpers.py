@@ -9,7 +9,7 @@ def parse_chart_actions(text: str) -> tuple[list[dict], str]:
     Returns:
         Tupla de (lista de specs Plotly, texto limpio sin bloques).
     """
-    pattern = r'\[CHART_ACTION\](.*?)\[/CHART_ACTION\]'
+    pattern = r'\*{0,2}\[CHART_ACTION\]\*{0,2}(.*?)\*{0,2}\[/CHART_ACTION\]\*{0,2}'
     actions: list[dict] = []
 
     for match in re.finditer(pattern, text, re.DOTALL):
@@ -31,7 +31,7 @@ def parse_chart_actions(text: str) -> tuple[list[dict], str]:
         except json.JSONDecodeError as e:
             actions.append({"_parse_error": f"JSON inválido: {e}", "_raw": raw_json})
 
-    cleaned = re.sub(pattern, '', text, flags=re.DOTALL).strip()
+    cleaned = re.sub(pattern, '', text, flags=re.DOTALL | re.IGNORECASE).strip()
     cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
     return actions, cleaned
 

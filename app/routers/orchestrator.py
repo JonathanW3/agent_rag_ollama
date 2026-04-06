@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+from ..auth import get_current_org, OrgContext
 from ..schemas import OrchestratorChatRequest, OrchestratorConfigRequest, OrchestratorAddAgentsRequest, ChatRequest
 from ..agents import agent_exists
 from ..orchestrator import (
@@ -15,7 +16,7 @@ router = APIRouter(prefix="/orchestrator", tags=["🎯 Orquestador"])
 
 
 @router.post("/chat", summary="Chat inteligente con routing automático")
-async def orchestrator_chat(req: OrchestratorChatRequest):
+async def orchestrator_chat(req: OrchestratorChatRequest, org: OrgContext = Depends(get_current_org)):
     """Analiza el mensaje del usuario y lo rutea al agente más adecuado de la lista configurada."""
     config = get_orchestrator_config()
 
@@ -79,7 +80,7 @@ async def orchestrator_chat(req: OrchestratorChatRequest):
 
 
 @router.get("/config", summary="Ver configuración del orquestador")
-async def get_config():
+async def get_config(org: OrgContext = Depends(get_current_org)):
     """Retorna la lista de agentes permitidos y la configuración actual."""
     config = get_orchestrator_config()
     agents_details = get_allowed_agents_details(config)
@@ -92,7 +93,7 @@ async def get_config():
 
 
 @router.put("/config", summary="Actualizar configuración del orquestador")
-async def update_config(req: OrchestratorConfigRequest):
+async def update_config(req: OrchestratorConfigRequest, org: OrgContext = Depends(get_current_org)):
     """Reemplaza la configuración completa del orquestador."""
     # Validar que los agentes existen
     missing = [aid for aid in req.allowed_agent_ids if not agent_exists(aid)]
@@ -118,7 +119,7 @@ async def update_config(req: OrchestratorConfigRequest):
 
 
 @router.post("/config/agents", summary="Agregar agentes al orquestador")
-async def add_agents(req: OrchestratorAddAgentsRequest):
+async def add_agents(req: OrchestratorAddAgentsRequest, org: OrgContext = Depends(get_current_org)):
     """Agrega uno o más agentes a la lista de permitidos sin afectar los existentes."""
     missing = [aid for aid in req.agent_ids if not agent_exists(aid)]
     if missing:
@@ -132,7 +133,7 @@ async def add_agents(req: OrchestratorAddAgentsRequest):
 
 
 @router.delete("/config/agents/{agent_id}", summary="Quitar agente del orquestador")
-async def remove_agent(agent_id: str):
+async def remove_agent(agent_id: str, org: OrgContext = Depends(get_current_org)):
     """Quita un agente de la lista de permitidos del orquestador."""
     config = get_orchestrator_config()
     if agent_id not in config["allowed_agent_ids"]:

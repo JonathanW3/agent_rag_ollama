@@ -13,7 +13,7 @@ def parse_cotizacion_actions(text: str) -> tuple[list[dict], str]:
     Returns:
         Tupla de (lista de acciones cotización, texto limpio sin bloques).
     """
-    pattern = r'\[COTIZACION_ACTION\](.*?)\[/COTIZACION_ACTION\]'
+    pattern = r'\*{0,2}\[COTIZACION_ACTION\]\*{0,2}(.*?)\*{0,2}\[/COTIZACION_ACTION\]\*{0,2}'
     actions: list[dict] = []
 
     for match in re.finditer(pattern, text, re.DOTALL):

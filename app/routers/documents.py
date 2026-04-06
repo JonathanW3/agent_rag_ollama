@@ -1,6 +1,7 @@
 import os
 import shutil
-from fastapi import APIRouter, UploadFile, File, HTTPException, Query
+from fastapi import APIRouter, UploadFile, File, HTTPException, Query, Depends
+from ..auth import get_current_org, OrgContext
 from ..config import settings
 from ..rag.ingest import ingest_file
 from ..agents import agent_exists
@@ -14,7 +15,8 @@ async def ingest(
     agent_id: str = Query(..., description="ID del agente al que asignar el documento"),
     document_title: str = Query(..., description="Título descriptivo del documento"),
     document_version: str = Query(default="1.0", description="Versión del documento (ej: 1.0, v2.3)"),
-    country: str = Query(default=None, description="País al que pertenece el documento (ej: Panamá, México)")
+    country: str = Query(default=None, description="País al que pertenece el documento (ej: Panamá, México)"),
+    org: OrgContext = Depends(get_current_org),
 ):
     """Ingesta un documento (PDF, TXT, JSON, XML, CSV) y lo almacena en la colección del agente especificado con metadata."""
     # Verificar que el agente existe

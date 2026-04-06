@@ -26,6 +26,14 @@ class Settings(BaseModel):
     ENCRYPTION_KEY: str = os.getenv("ENCRYPTION_KEY", "")  # Clave para cifrar datos sensibles (SMTP)
     PUBLIC_API_URL: str = os.getenv("PUBLIC_API_URL", "http://localhost:8000")  # URL pública del API (para webhooks)
 
+    # Platform DB — autenticación multi-tenant
+    PLATFORM_DB_HOST: str = os.getenv("PLATFORM_DB_HOST", "localhost")
+    PLATFORM_DB_PORT: int = int(os.getenv("PLATFORM_DB_PORT", "3306"))
+    PLATFORM_DB_USER: str = os.getenv("PLATFORM_DB_USER", "platform_app")
+    PLATFORM_DB_PASSWORD: str = os.getenv("PLATFORM_DB_PASSWORD", "")
+    PLATFORM_DB_DATABASE: str = os.getenv("PLATFORM_DB_DATABASE", "platform_db")
+    MASTER_KEY: str = os.getenv("MASTER_KEY", "")  # Clave para endpoints de administración de orgs
+
     class Config:
         validate_assignment = True
 

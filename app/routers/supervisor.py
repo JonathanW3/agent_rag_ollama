@@ -10,7 +10,8 @@ import json
 import re
 import uuid
 from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+from ..auth import get_current_org, OrgContext
 from ..schemas import FeedbackRequest, PromptProposalRequest, SupervisorTestRequest, SupervisorConfigUpdate, ChatRequest
 from ..agents import get_agent, list_agents, update_agent, get_agent_stats
 from ..memory import get_history, get_all_sessions, clear_session
@@ -129,7 +130,7 @@ def _get_supervisor_prompt(prompt_key: str) -> str:
 # ══════════════════════════════════════════════════════════════
 
 @router.get("/config", summary="Ver configuración del supervisor")
-async def get_config():
+async def get_config(org: OrgContext = Depends(get_current_org)):
     """Retorna la configuración actual del supervisor: modelo y system prompts.
 
     Los campos con valor null usan el valor por defecto del sistema.
@@ -150,7 +151,7 @@ async def get_config():
 
 
 @router.put("/config", summary="Actualizar configuración del supervisor")
-async def update_config(req: SupervisorConfigUpdate):
+async def update_config(req: SupervisorConfigUpdate, org: OrgContext = Depends(get_current_org)):
     """Actualiza modelo y/o system prompts del supervisor.
 
     Solo se modifican los campos enviados (no-null). Para restaurar un campo
@@ -186,7 +187,7 @@ async def update_config(req: SupervisorConfigUpdate):
 
 
 @router.delete("/config", summary="Restaurar configuración del supervisor a defaults")
-async def reset_config():
+async def reset_config(org: OrgContext = Depends(get_current_org)):
     """Elimina toda la configuración personalizada y restaura los valores por defecto."""
     r = get_redis_client()
     r.delete(REDIS_SUPERVISOR_CONFIG_KEY)
@@ -334,7 +335,7 @@ def _llm_json_call(messages: list[dict], temperature: float, model: str,
 # ══════════════════════════════════════════════════════════════
 
 @router.post("/feedback", summary="Enviar feedback de un mensaje")
-async def submit_feedback(req: FeedbackRequest):
+async def submit_feedback(req: FeedbackRequest, org: OrgContext = Depends(get_current_org)):
     """Registra feedback thumbs up/down para un mensaje específico del asistente."""
     if req.score not in (-1, 1):
         raise HTTPException(status_code=422, detail="Score debe ser 1 (👍 positivo) o -1 (👎 negativo). Campos requeridos: agent_id, session_id, message_index, score")
@@ -484,7 +485,7 @@ async def _get_agent_conversations(agent_id: str, max_sessions: int = 10) -> lis
 
 
 @router.post("/evaluate/{agent_id}", summary="Evaluar calidad de un agente")
-async def evaluate_agent(agent_id: str):
+async def evaluate_agent(agent_id: str, org: OrgContext = Depends(get_current_org)):
     """Evalúa la calidad de un agente analizando sus conversaciones, feedback y métricas."""
     agent = get_agent(agent_id)
     if agent is None:
@@ -556,7 +557,7 @@ async def evaluate_agent(agent_id: str):
 # ══════════════════════════════════════════════════════════════
 
 @router.get("/report", summary="Reporte ejecutivo de todos los agentes")
-async def supervisor_report():
+async def supervisor_report(org: OrgContext = Depends(get_current_org)):
     """Genera un resumen ejecutivo del estado de todos los agentes."""
     agents = list_agents()
     mcp_client = get_mcp_client()
@@ -652,7 +653,7 @@ Genera un prompt mejorado que solucione estos problemas manteniendo la esencia d
 
 
 @router.post("/suggest-prompt/{agent_id}", summary="Generar propuesta de prompt mejorado")
-async def suggest_prompt(agent_id: str):
+async def suggest_prompt(agent_id: str, org: OrgContext = Depends(get_current_org)):
     """Evalúa un agente y genera una propuesta de prompt mejorado para aprobación humana."""
     agent = get_agent(agent_id)
     if agent is None:
@@ -725,7 +726,7 @@ async def suggest_prompt(agent_id: str):
 
 
 @router.get("/proposals", summary="Listar propuestas pendientes")
-async def list_proposals():
+async def list_proposals(org: OrgContext = Depends(get_current_org)):
     """Lista todas las propuestas de prompt pendientes de aprobación."""
     client = get_redis_client()
     proposals = []
@@ -754,7 +755,7 @@ async def list_proposals():
 # ══════════════════════════════════════════════════════════════
 
 @router.post("/approve/{proposal_id:path}", summary="Aprobar propuesta de prompt")
-async def approve_proposal(proposal_id: str, req: PromptProposalRequest = None):
+async def approve_proposal(proposal_id: str, req: PromptProposalRequest = None, org: OrgContext = Depends(get_current_org)):
     """Aprueba una propuesta y aplica el nuevo prompt al agente."""
     client = get_redis_client()
     data = client.get(proposal_id)
@@ -839,7 +840,7 @@ async def approve_proposal(proposal_id: str, req: PromptProposalRequest = None):
 
 
 @router.post("/reject/{proposal_id:path}", summary="Rechazar propuesta de prompt")
-async def reject_proposal(proposal_id: str, req: PromptProposalRequest = None):
+async def reject_proposal(proposal_id: str, req: PromptProposalRequest = None, org: OrgContext = Depends(get_current_org)):
     """Rechaza una propuesta de prompt sin aplicar cambios."""
     client = get_redis_client()
     data = client.get(proposal_id)
@@ -918,71 +919,70 @@ Genera las preguntas de prueba."""
 async def _execute_test_conversation(agent_id: str, questions: list[str], temperature: float) -> list[dict]:
     """Ejecuta las preguntas contra el agente usando la lógica real de chat.
 
-    Optimizaciones para tests:
-    - Cada turno usa su propia sesión (evita acumulación de historial que ralentiza turnos posteriores)
+    Simula un usuario real: usa una única sesión continua para toda la prueba,
+    de modo que el agente recuerda el contexto de turnos anteriores.
+
     - use_sql=False (no necesario para evaluación, ahorra queries SQLite)
     - use_email=False (no enviar emails reales)
     - Los charts se mantienen habilitados si el agente los tiene, para evaluar su uso
 
     Retorna los resultados completos de cada interacción.
     """
-    test_session_base = f"supervisor-test-{uuid.uuid4().hex[:8]}"
+    session_id = f"supervisor-test-{uuid.uuid4().hex[:8]}"
     results = []
 
     agent = get_agent(agent_id)
 
-    for i, question in enumerate(questions):
-        # Sesión independiente por turno: evita que el historial crezca
-        # y cada turno posterior sea más lento que el anterior
-        turn_session_id = f"{test_session_base}-t{i}"
-        try:
-            chat_req = ChatRequest(
-                message=question,
-                agent_id=agent_id,
-                session_id=turn_session_id,
-                temperature=temperature,
-                use_rag=agent.get("use_rag", True) if agent.get("use_rag") else False,
-                use_sql=False,  # No necesario para evaluación
-                use_mysql=agent.get("use_mysql", False),
-                use_email=False,
-                use_charts=agent.get("use_charts", False),
-            )
-
-            response = await execute_chat(chat_req)
-
-            results.append({
-                "turn": i + 1,
-                "question": question,
-                "answer": response.get("answer", ""),
-                "sources_count": len(response.get("sources", [])),
-                "sources": [s.get("text", "")[:200] for s in response.get("sources", [])[:3]],
-                "charts_count": response.get("charts_count", 0),
-                "charts_types": [
-                    trace.get("type", "unknown")
-                    for chart in response.get("charts", [])
-                    for trace in chart.get("data", [])
-                ],
-                "email_sent": response.get("email_sent", False),
-                "email_results": response.get("email_results", []),
-                "sql_used": response.get("sql_used", False),
-                "model": response.get("llm_model", ""),
-                "history_length": response.get("history_length", 0),
-                "success": True
-            })
-        except Exception as e:
-            results.append({
-                "turn": i + 1,
-                "question": question,
-                "answer": "",
-                "error": str(e),
-                "success": False
-            })
-        finally:
-            # Limpiar sesión de este turno inmediatamente
+    try:
+        for i, question in enumerate(questions):
             try:
-                clear_session(agent_id, turn_session_id)
-            except Exception:
-                pass
+                chat_req = ChatRequest(
+                    message=question,
+                    agent_id=agent_id,
+                    session_id=session_id,
+                    temperature=temperature,
+                    use_rag=agent.get("use_rag", True) if agent.get("use_rag") else False,
+                    use_sql=False,  # No necesario para evaluación
+                    use_mysql=agent.get("use_mysql", False),
+                    use_email=False,
+                    use_charts=agent.get("use_charts", False),
+                )
+
+                response = await execute_chat(chat_req)
+
+                results.append({
+                    "turn": i + 1,
+                    "question": question,
+                    "answer": response.get("answer", ""),
+                    "sources_count": len(response.get("sources", [])),
+                    "sources": [s.get("text", "")[:200] for s in response.get("sources", [])[:3]],
+                    "charts_count": response.get("charts_count", 0),
+                    "charts_types": [
+                        trace.get("type", "unknown")
+                        for chart in response.get("charts", [])
+                        for trace in chart.get("data", [])
+                    ],
+                    "email_sent": response.get("email_sent", False),
+                    "email_results": response.get("email_results", []),
+                    "sql_used": response.get("sql_used", False),
+                    "model": response.get("llm_model", ""),
+                    "history_length": response.get("history_length", 0),
+                    "success": True
+                })
+            except Exception as e:
+                results.append({
+                    "turn": i + 1,
+                    "question": question,
+                    "answer": "",
+                    "error": str(e),
+                    "success": False
+                })
+    finally:
+        # Limpiar la sesión completa al terminar la prueba
+        try:
+            clear_session(agent_id, session_id)
+        except Exception:
+            pass
 
     return results
 
@@ -1170,7 +1170,7 @@ def _evaluate_per_turn(agent: dict, test_results: list[dict], model: str) -> dic
 
 
 @router.post("/test/{agent_id}", summary="Prueba activa: simular usuario y evaluar agente")
-async def test_agent(agent_id: str, req: SupervisorTestRequest = None):
+async def test_agent(agent_id: str, req: SupervisorTestRequest = None, org: OrgContext = Depends(get_current_org)):
     """Ejecuta una prueba activa contra un agente simulando ser un usuario final.
 
     El supervisor:
@@ -1352,7 +1352,7 @@ async def test_agent(agent_id: str, req: SupervisorTestRequest = None):
 # ══════════════════════════════════════════════════════════════
 
 @router.get("/history/{agent_id}", summary="Historial de versiones de prompt")
-async def prompt_history(agent_id: str):
+async def prompt_history(agent_id: str, org: OrgContext = Depends(get_current_org)):
     """Obtiene el historial de versiones del prompt de un agente."""
     agent = get_agent(agent_id)
     if agent is None:
@@ -1376,7 +1376,7 @@ async def prompt_history(agent_id: str):
 
 
 @router.post("/rollback/{agent_id}", summary="Revertir prompt a versión anterior")
-async def rollback_prompt(agent_id: str, version: int = None):
+async def rollback_prompt(agent_id: str, version: int = None, org: OrgContext = Depends(get_current_org)):
     """Revierte el prompt del agente a una versión anterior. Si no se especifica versión, usa la última guardada."""
     agent = get_agent(agent_id)
     if agent is None:
