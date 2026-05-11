@@ -11,6 +11,8 @@ from ..ollama_client import ollama_chat
 from ..rag.retrieve import retrieve, build_context
 from ..utils.email_helpers import parse_email_actions, execute_email_actions
 from ..utils.imap_helpers import parse_imap_actions, execute_imap_actions, format_imap_results_for_history
+from ..utils.imap_facturas_helpers import parse_imap_facturas_actions, execute_imap_facturas_actions, format_imap_facturas_results_for_history
+from mcp_imap_facturas.client import get_imap_facturas_client
 from ..utils.chart_helpers import parse_chart_actions
 from ..utils.calendar_helpers import parse_calendar_actions, execute_calendar_actions
 from ..utils.cotizacion_helpers import parse_cotizacion_actions
@@ -20,6 +22,7 @@ from mcp_email.client import get_email_client
 from mcp_mysql.client import get_mysql_client
 from mcp_mysql_ibm.client import get_ibm_client
 from mcp_mysql_autopart.client import get_autopart_client
+from mcp_sqlserver.client import get_webpos_client
 from mcp_google_calendar.client import get_calendar_client
 from mcp_FE.client import get_fe_client
 from ..utils.fe_helpers import parse_fe_actions, execute_fe_actions
@@ -50,11 +53,15 @@ async def chat(req: ChatRequest, org: OrgContext = Depends(get_current_org)):
     eff_use_ibm = req.use_ibm if req.use_ibm is not None else agent_default_ibm
     agent_default_autopart = agent.get("use_autopart", False)
     eff_use_autopart = req.use_autopart if req.use_autopart is not None else agent_default_autopart
+    agent_default_webpospa = agent.get("use_webpospa", False)
+    eff_use_webpospa = req.use_webpospa if req.use_webpospa is not None else agent_default_webpospa
     # IMAP: si el agente tiene imap_config, habilitar por defecto
     agent_default_imap = agent.get("use_imap", bool(agent.get("imap_config")))
     eff_use_imap = req.use_imap if req.use_imap is not None else agent_default_imap
     agent_default_fe = agent.get("use_fe", False)
     eff_use_fe = req.use_fe if req.use_fe is not None else agent_default_fe
+    agent_default_imap_facturas = agent.get("use_imap_facturas", False)
+    eff_use_imap_facturas = req.use_imap_facturas if req.use_imap_facturas is not None else agent_default_imap_facturas
     eff_top_k = req.top_k if req.top_k is not None else agent.get("top_k", settings.TOP_K)
     eff_temperature = req.temperature if req.temperature is not None else agent.get("temperature", 0.7)
 
@@ -176,6 +183,85 @@ async def chat(req: ChatRequest, org: OrgContext = Depends(get_current_org)):
             "--- FIN CAPACIDAD IMAP ---"
         )
         messages[0]["content"] += imap_instructions
+
+    # Inyectar capacidad de análisis de facturación IMAP (mcp_imap_facturas)
+    if eff_use_imap_facturas:
+        from datetime import date as _date, timedelta as _td
+        _today = _date.today()
+        _curr_start  = _today.replace(day=1)
+        _curr_end    = (_curr_start + _td(days=32)).replace(day=1)
+        _prev_end    = _curr_start
+        _prev_start  = (_prev_end - _td(days=1)).replace(day=1)
+        _two_months_end   = _prev_start
+        _two_months_start = (_two_months_end - _td(days=1)).replace(day=1)
+        _curr_month_name       = _today.strftime("%B %Y")
+        _prev_month_name       = _prev_start.strftime("%B %Y")
+        _two_months_name       = _two_months_start.strftime("%B %Y")
+
+        imap_facturas_instructions = (
+            "\n\n--- CAPACIDAD DE ANÁLISIS DE FACTURACIÓN ---\n"
+            "Tienes acceso a la base de datos de facturación (sincronizada cada hora desde el buzón IMAP).\n"
+            "Los datos ya están indexados — las consultas son instantáneas.\n"
+            "NO accedes al buzón directamente; consultas la base de datos.\n\n"
+
+            f"FECHAS DE HOY (ya calculadas — úsalas directamente, NO las modifiques):\n"
+            f"  Hoy:                        {_today}\n"
+            f"  Mes actual ({_curr_month_name}):  since_date={_curr_start}  before_date={_curr_end}\n"
+            f"  Mes anterior ({_prev_month_name}): since_date={_prev_start}  before_date={_prev_end}\n"
+            f"  Hace 2 meses ({_two_months_name}): since_date={_two_months_start}  before_date={_two_months_end}\n"
+            f"  Últimos 2 meses completos:  since_date={_two_months_start}  before_date={_curr_end}\n\n"
+
+            "REGLA FUNDAMENTAL: Cuando el usuario pregunte sobre facturas o comparaciones entre meses, "
+            "genera un bloque [IMAP_FACTURAS_ACTION] de inmediato con las fechas exactas de arriba. "
+            "NUNCA uses placeholders como 'YYYY-MM-DD'.\n\n"
+
+            "FLUJO:\n"
+            "1. Escribe una línea breve ('Consultando la base de datos...').\n"
+            "2. Incluye el bloque [IMAP_FACTURAS_ACTION] al final.\n"
+            "3. El SISTEMA ejecutará la herramienta y guardará los resultados en el historial.\n"
+            "4. En tu siguiente turno verás [RESULTADO DE IMAP FACTURAS]...[/RESULTADO DE IMAP FACTURAS].\n"
+            "5. Con esos datos presenta la respuesta al usuario (tablas markdown si aplica).\n\n"
+
+            "FORMATO DEL BLOQUE (JSON puro, sin texto extra ni markdown dentro):\n"
+            "[IMAP_FACTURAS_ACTION]\n"
+            '{"tool": "nombre_herramienta", "param1": "valor1"}\n'
+            "[/IMAP_FACTURAS_ACTION]\n\n"
+
+            "HERRAMIENTAS DISPONIBLES:\n\n"
+
+            "★ 1. facturas_del_periodo — Lista facturas con empresa, RUC, subtotal, IVA, total y descripción.\n"
+            "   Usar para: 'lista de facturas', 'facturas de este mes', 'facturas de abril',\n"
+            "   'cuánto pagamos a empresa X', 'últimos 2 meses'.\n"
+            "   Parámetro opcional 'empresa' para filtrar por nombre o RUC.\n"
+            f'   {{"tool": "facturas_del_periodo", "since_date": "{_curr_start}", "before_date": "{_curr_end}"}}\n\n'
+
+            "★ 2. comparar_periodos_facturas — Tabla comparativa A vs B por empresa con montos.\n"
+            "   FALTA EN B = empresa que facturó en A pero NO en B (pendientes del mes actual).\n"
+            "   Usar para: 'qué empresas faltan este mes', 'comparar meses', 'pendientes de facturar'.\n"
+            f'   {{"tool": "comparar_periodos_facturas", '
+            f'"period_a_start": "{_prev_start}", "period_a_end": "{_prev_end}", '
+            f'"period_b_start": "{_curr_start}", "period_b_end": "{_curr_end}"}}\n\n'
+
+            "3. comunicaciones_del_periodo — Emails de comunicación con clientes/proveedores (no facturas).\n"
+            "   Usar para: '¿qué nos escribió empresa X?', 'correos de soporte', 'comunicaciones de marzo'.\n"
+            "   Parámetro opcional 'empresa' para filtrar por remitente o asunto.\n"
+            f'   {{"tool": "comunicaciones_del_periodo", "since_date": "{_curr_start}", "before_date": "{_curr_end}"}}\n\n'
+
+            "EJEMPLOS DE INTERPRETACIÓN:\n"
+            f"  'facturas de este mes'           → facturas_del_periodo since={_curr_start} before={_curr_end}\n"
+            f"  'facturas del mes pasado'         → facturas_del_periodo since={_prev_start} before={_prev_end}\n"
+            f"  'últimos 2 meses' / '2 meses'     → facturas_del_periodo since={_two_months_start} before={_curr_end}\n"
+            f"  'qué empresas faltan este mes'    → comparar_periodos_facturas A={_prev_start}→{_prev_end} B={_curr_start}→{_curr_end}\n"
+            f"  'comparar meses'                  → comparar_periodos_facturas A={_prev_start}→{_prev_end} B={_curr_start}→{_curr_end}\n\n"
+
+            "REGLAS:\n"
+            "- USA SIEMPRE las fechas del bloque 'FECHAS DE HOY', nunca placeholders.\n"
+            "- NUNCA inventes datos que no estén en los resultados.\n"
+            "- NUNCA generes bloques [RESULTADO DE IMAP FACTURAS]; esos los genera el SISTEMA.\n"
+            "- before_date es EXCLUSIVA (no incluye ese día).\n"
+            "--- FIN CAPACIDAD ANÁLISIS DE FACTURACIÓN ---"
+        )
+        messages[0]["content"] += imap_facturas_instructions
 
     # Inyectar capacidad de Facturación Electrónica FEPA si está habilitado
     if eff_use_fe:
@@ -768,6 +854,201 @@ async def chat(req: ChatRequest, org: OrgContext = Depends(get_current_org)):
             except Exception as e:
                 print(f"Error consultando Autopart MCP: {e}")
 
+    # Agregar contexto SQL Server webpospa (licencias Ecuador) si está habilitado
+    print(f"[WEBPOSPA DEBUG] eff_use_webpospa={eff_use_webpospa} | agente={req.agent_id}")
+    if eff_use_webpospa:
+        try:
+            webpos = get_webpos_client()
+            webpos_parts = []
+            message_lower = req.message.lower()
+
+            # Detectar RUC (13 dígitos) en el mensaje para búsqueda específica
+            ruc_match = re.search(r"\b(\d{13})\b", req.message)
+            # Detectar nombre de empresa entre comillas o tras palabras clave
+            nombre_match = re.search(
+                r'(?:empresa|compañia|compañía|cliente|busca[r]?)\s+["\']?([A-Za-záéíóúÁÉÍÓÚñÑ\s\.]+)["\']?',
+                message_lower
+            )
+
+            licencias_keywords = [
+                "licencia", "licencias", "vencer", "vencimiento", "vence", "expira",
+                "expiración", "renovar", "renovación", "ruc", "empresa", "cliente",
+                "soporte", "sws", "webpos", "efiscal", "ecuador", "contacto", "correo",
+                "email", "fecha", "días", "dias", "contrato", "licenciamiento", "nube",
+                "caducar", "caduca", "caduco", "caducó", "vencida", "vencidas", "meses",
+                "on-premise", "on premise"
+            ]
+            needs_webpospa = (
+                ruc_match is not None
+                or nombre_match is not None
+                or any(kw in message_lower for kw in licencias_keywords)
+            )
+
+            # Detectar intención: filtro por tipo de cliente Licenciamiento
+            licenciamiento_kws = ["licenciamiento", "on-premise", "on premise"]
+            is_licenciamiento_query = any(kw in message_lower for kw in licenciamiento_kws)
+
+            # Detectar intención: consulta por mes/meses (calendario anual de vencimientos)
+            meses_kws = ["mes ", "meses", "mes?", "mensual", "calendario", "anual"]
+            is_meses_query = any(kw in message_lower for kw in meses_kws)
+
+            print(f"[WEBPOSPA DEBUG] needs_webpospa={needs_webpospa} | licenciamiento={is_licenciamiento_query} | meses={is_meses_query} | ruc={ruc_match.group(1) if ruc_match else None} | nombre={nombre_match.group(1).strip() if nombre_match else None}")
+
+            webpospa_no_data_msg = None
+
+            if needs_webpospa:
+                if ruc_match:
+                    ruc = ruc_match.group(1)
+                    print(f"[WEBPOSPA DEBUG] Consultando SQL Server — buscar_empresa_ecuador(ruc={ruc})")
+                    resultado = await webpos.buscar_empresa_ecuador(ruc=ruc)
+                    print(f"[WEBPOSPA DEBUG] Resultado: success={resultado.get('success')} count={resultado.get('count')} error={resultado.get('error')}")
+                    if resultado.get("success") and resultado.get("count", 0) > 0:
+                        print(f"[WEBPOSPA DEBUG] ✓ {resultado['count']} fila(s) encontrada(s) para RUC {ruc}")
+                        webpos_parts.append(
+                            f"Datos de la empresa con RUC {ruc} (SQL Server webpospa):\n"
+                            + json.dumps(resultado["rows"], indent=2, ensure_ascii=False, default=str)
+                        )
+                    elif resultado.get("error"):
+                        print(f"[WEBPOSPA DEBUG] ✗ Error SQL Server: {resultado['error']}")
+                        webpospa_no_data_msg = f"Error al consultar SQL Server: {resultado['error']}. NO inventes datos."
+                    else:
+                        print(f"[WEBPOSPA DEBUG] ✗ RUC {ruc} no encontrado en Ecuador (0 filas)")
+                        webpospa_no_data_msg = (
+                            f"La consulta a SQL Server no encontró ninguna empresa con RUC {ruc} en Ecuador. "
+                            "NO inventes datos. Informa al usuario que no se encontraron registros para ese RUC."
+                        )
+                elif nombre_match:
+                    nombre = nombre_match.group(1).strip()
+                    print(f"[WEBPOSPA DEBUG] Consultando SQL Server — buscar_empresa_ecuador(nombre='{nombre}')")
+                    resultado = await webpos.buscar_empresa_ecuador(nombre=nombre)
+                    print(f"[WEBPOSPA DEBUG] Resultado: success={resultado.get('success')} count={resultado.get('count')} error={resultado.get('error')}")
+                    if resultado.get("success") and resultado.get("count", 0) > 0:
+                        print(f"[WEBPOSPA DEBUG] ✓ {resultado['count']} empresa(s) encontrada(s) para nombre '{nombre}'")
+                        webpos_parts.append(
+                            f"Empresas que coinciden con '{nombre}' (SQL Server webpospa):\n"
+                            + json.dumps(resultado["rows"], indent=2, ensure_ascii=False, default=str)
+                        )
+                    elif resultado.get("error"):
+                        print(f"[WEBPOSPA DEBUG] ✗ Error SQL Server: {resultado['error']}")
+                        webpospa_no_data_msg = f"Error al consultar SQL Server: {resultado['error']}. NO inventes datos."
+                    else:
+                        print(f"[WEBPOSPA DEBUG] ✗ Nombre '{nombre}' no encontrado en Ecuador (0 filas)")
+                        webpospa_no_data_msg = (
+                            f"La consulta a SQL Server no encontró empresas con nombre '{nombre}' en Ecuador. "
+                            "NO inventes datos. Informa al usuario que no se encontraron registros."
+                        )
+                elif is_licenciamiento_query:
+                    # Resumen liviano de empresas Licenciamiento (sin LicenciasJSON)
+                    print(f"[WEBPOSPA DEBUG] Consultando — resumen_tipo_licenciamiento(licenciamiento=True)")
+                    resultado = await webpos.resumen_tipo_licenciamiento(licenciamiento=True)
+                    print(f"[WEBPOSPA DEBUG] Resultado: success={resultado.get('success')} count={resultado.get('count')} error={resultado.get('error')}")
+                    if resultado.get("success") and resultado.get("count", 0) > 0:
+                        print(f"[WEBPOSPA DEBUG] ✓ {resultado['count']} empresa(s) Licenciamiento")
+                        webpos_parts.append(
+                            f"Empresas de tipo Licenciamiento (on-premise) — {resultado['count']} empresa(s) total.\n"
+                            "⚠️ IMPORTANTE: El campo EFiscalDocsExpirationDate almacena una fecha histórica — "
+                            "el AÑO debe IGNORARSE. Solo el MES y DÍA son relevantes (renovación anual). "
+                            "Para la fecha real próxima usa ProximaFechaVencimiento del bloque siguiente.\n"
+                            "⚠️ INSTRUCCIÓN: Muestra TODAS las empresas con sus fechas de renovación, "
+                            "sin filtrar por ventana de días. No limites la respuesta a 45 días.\n\n"
+                            + json.dumps(resultado["rows"], indent=2, ensure_ascii=False, default=str)
+                        )
+                        # Siempre agregar calendario eFiscalDocs (año ignorado, próximos 12 meses)
+                        print(f"[WEBPOSPA DEBUG] + licencias_efiscal_por_mes(dias=365)")
+                        res_meses = await webpos.licencias_efiscal_por_mes(dias=365)
+                        if res_meses.get("success") and res_meses.get("count", 0) > 0:
+                            print(f"[WEBPOSPA DEBUG] ✓ {res_meses['count']} vencimiento(s) eFiscalDocs")
+                            webpos_parts.append(
+                                "Vencimientos eFiscalDocs por mes (próximos 12 meses, solo Licenciamiento).\n"
+                                "Campos clave: ProximaFechaVencimiento = fecha real (año correcto), "
+                                "DiasParaVencer = días hasta esa fecha, MesVencimiento = mes.\n"
+                                "⚠️ INSTRUCCIÓN: Ordena por DiasParaVencer y muestra TODOS — "
+                                "no cortes la lista ni filtres por ventana de días:\n\n"
+                                + json.dumps(res_meses["rows"], indent=2, ensure_ascii=False, default=str)
+                            )
+                    elif resultado.get("error"):
+                        print(f"[WEBPOSPA DEBUG] ✗ Error: {resultado['error']}")
+                        webpospa_no_data_msg = f"Error al consultar: {resultado['error']}. NO inventes datos."
+                    else:
+                        print(f"[WEBPOSPA DEBUG] ✗ Sin empresas de tipo Licenciamiento (0 filas)")
+                        webpospa_no_data_msg = (
+                            "No se encontraron empresas de tipo Licenciamiento (on-premise). NO inventes datos."
+                        )
+                elif is_meses_query:
+                    # Consulta de calendario anual de vencimientos eFiscalDocs
+                    print(f"[WEBPOSPA DEBUG] Consultando SQL Server — licencias_efiscal_por_mes(dias=365)")
+                    resultado = await webpos.licencias_efiscal_por_mes(dias=365)
+                    print(f"[WEBPOSPA DEBUG] Resultado: success={resultado.get('success')} count={resultado.get('count')} error={resultado.get('error')}")
+                    if resultado.get("success") and resultado.get("count", 0) > 0:
+                        print(f"[WEBPOSPA DEBUG] ✓ {resultado['count']} empresa(s) con vencimiento eFiscalDocs próximo")
+                        webpos_parts.append(
+                            "Vencimientos eFiscalDocs por mes (próximos 12 meses, solo Licenciamiento).\n"
+                            "El campo EFiscalDocsExpirationDate almacena una fecha histórica — el AÑO se ignora. "
+                            "Usa ProximaFechaVencimiento para la fecha real del próximo vencimiento "
+                            "y DiasParaVencer para los días restantes:\n\n"
+                            + json.dumps(resultado["rows"], indent=2, ensure_ascii=False, default=str)
+                        )
+                    elif resultado.get("error"):
+                        print(f"[WEBPOSPA DEBUG] ✗ Error SQL Server: {resultado['error']}")
+                        webpospa_no_data_msg = f"Error al consultar SQL Server: {resultado['error']}. NO inventes datos."
+                    else:
+                        print(f"[WEBPOSPA DEBUG] ✗ Sin vencimientos eFiscalDocs en los próximos 12 meses (0 filas)")
+                        webpospa_no_data_msg = (
+                            "No se encontraron vencimientos de eFiscalDocs en los próximos 12 meses. "
+                            "NO inventes datos."
+                        )
+                else:
+                    print(f"[WEBPOSPA DEBUG] Consultando SQL Server — licencias_por_vencer(dias=60)")
+                    resultado = await webpos.licencias_por_vencer(dias=60, campo_fecha="ambas")
+                    print(f"[WEBPOSPA DEBUG] Resultado: success={resultado.get('success')} count={resultado.get('count')} error={resultado.get('error')}")
+                    if resultado.get("success") and resultado.get("count", 0) > 0:
+                        print(f"[WEBPOSPA DEBUG] ✓ {resultado['count']} licencia(s) por vencer encontrada(s)")
+                        webpos_parts.append(
+                            f"Licencias por vencer en los próximos 60 días (SQL Server webpospa):\n"
+                            + json.dumps(resultado["rows"], indent=2, ensure_ascii=False, default=str)
+                        )
+                    elif resultado.get("error"):
+                        print(f"[WEBPOSPA DEBUG] ✗ Error SQL Server: {resultado['error']}")
+                        webpospa_no_data_msg = f"Error al consultar SQL Server: {resultado['error']}. NO inventes datos."
+                    else:
+                        print(f"[WEBPOSPA DEBUG] ✗ Sin licencias por vencer en 60 días (0 filas)")
+                        webpospa_no_data_msg = (
+                            "La consulta a SQL Server no encontró licencias por vencer en los próximos 60 días. "
+                            "NO inventes datos. Informa al usuario que no hay registros."
+                        )
+
+                if webpos_parts:
+                    print(f"[WEBPOSPA DEBUG] ✓ Contexto SQL Server inyectado al LLM ({len(webpos_parts)} bloque(s))")
+                    messages.append({
+                        "role": "system",
+                        "content": (
+                            "Datos reales de licencias webpospa Ecuador disponibles para responder. "
+                            "USA ÚNICAMENTE ESTOS DATOS — no inventes ni supongas información:\n\n"
+                            + "\n\n".join(webpos_parts)
+                        )
+                    })
+                elif webpospa_no_data_msg:
+                    print(f"[WEBPOSPA DEBUG] ✗ Sin datos — inyectando advertencia al LLM")
+                    messages.append({
+                        "role": "system",
+                        "content": (
+                            "ADVERTENCIA — Sin datos de SQL Server: " + webpospa_no_data_msg
+                        )
+                    })
+            else:
+                print(f"[WEBPOSPA DEBUG] Mensaje no requiere consulta SQL Server (sin keywords ni RUC)")
+        except Exception as e:
+            print(f"[WEBPOSPA DEBUG] ✗ EXCEPCIÓN conectando a SQL Server: {type(e).__name__}: {e}")
+            messages.append({
+                "role": "system",
+                "content": (
+                    f"ADVERTENCIA — No se pudo conectar a SQL Server webpospa: {e}. "
+                    "NO inventes datos de licencias. Informa al usuario que hay un problema de conexión."
+                )
+            })
+    else:
+        print(f"[WEBPOSPA DEBUG] MCP SQL Server DESHABILITADO para agente '{req.agent_id}' — use_webpospa={agent.get('use_webpospa')} en config del agente")
+
     # Agregar contexto RAG si está habilitado (verificar config del agente Y el parámetro de la request)
     agent_uses_rag = agent.get("use_rag", True)  # Por defecto True para retrocompatibilidad
     if eff_use_rag and agent_uses_rag:
@@ -792,8 +1073,10 @@ async def chat(req: ChatRequest, org: OrgContext = Depends(get_current_org)):
     agent_model = agent.get("llm_model") or settings.CHAT_MODEL
 
     # Obtener respuesta del modelo
+    # Aumentar num_predict cuando hay contexto webpospa grande (múltiples empresas)
+    _num_predict = 4096 if eff_use_webpospa else None
     try:
-        answer = ollama_chat(messages, temperature=eff_temperature, model=agent_model)
+        answer = ollama_chat(messages, temperature=eff_temperature, model=agent_model, num_predict=_num_predict)
     except Exception as e:
         raise HTTPException(
             status_code=500,
@@ -1011,6 +1294,33 @@ async def chat(req: ChatRequest, org: OrgContext = Depends(get_current_org)):
             traceback.print_exc()
     # ── END IMAP POST-PROCESSING ──────────────────────────────────────
 
+    # ── IMAP FACTURAS POST-PROCESSING ────────────────────────────────
+    imap_facturas_results = []
+    imap_facturas_executed = False
+
+    if eff_use_imap_facturas:
+        try:
+            fake_if_pattern = r'\[RESULTADO DE IMAP FACTURAS\].*?\[/RESULTADO DE IMAP FACTURAS\]'
+            answer = re.sub(fake_if_pattern, '', answer, flags=re.DOTALL).strip()
+
+            imap_facturas_actions, cleaned_answer = parse_imap_facturas_actions(answer)
+            print(f"[IMAP_FACTURAS DEBUG] Acciones parseadas: {len(imap_facturas_actions)}")
+
+            if imap_facturas_actions:
+                imap_facturas_client = get_imap_facturas_client()
+                imap_facturas_results = await execute_imap_facturas_actions(
+                    actions=imap_facturas_actions,
+                    client=imap_facturas_client,
+                )
+                imap_facturas_executed = any(r.get("success") for r in imap_facturas_results)
+                print(f"[IMAP_FACTURAS DEBUG] Ejecutadas: {imap_facturas_executed} | Resultados: {len(imap_facturas_results)}")
+                answer = cleaned_answer
+        except Exception as e:
+            print(f"[IMAP_FACTURAS ERROR] Error en post-procesamiento: {e}")
+            import traceback
+            traceback.print_exc()
+    # ── END IMAP FACTURAS POST-PROCESSING ────────────────────────────
+
     # ── FE POST-PROCESSING ───────────────────────────────────────────
     fe_results = []
     fe_executed = False
@@ -1081,7 +1391,39 @@ async def chat(req: ChatRequest, org: OrgContext = Depends(get_current_org)):
                         print(f"[FE ERROR] Error en segunda llamada LLM: {e}")
                         answer = cleaned_answer
                 else:
-                    answer = cleaned_answer
+                    # La API fue llamada pero todas las consultas fallaron.
+                    # Hacer segunda llamada con el error para que el agente lo explique al usuario.
+                    fe_errors = [
+                        r.get("error", "Error desconocido")
+                        for r in fe_results
+                        if not r.get("success") and r.get("error")
+                    ]
+                    if fe_errors:
+                        error_text = "\n".join(fe_errors)
+                        error_system = (
+                            "Eres un asistente de Facturación Electrónica. "
+                            "Responde siempre en español.\n\n"
+                            f"La consulta a la API FEPA falló con el siguiente mensaje:\n{error_text}\n\n"
+                            "TU TAREA: informar al usuario del problema de forma clara y amigable. "
+                            "Sugiere que verifique el CUFE o la referencia ingresada. "
+                            "NO generes [FE_ACTION] ni bloques de acción. "
+                            "NO inventes datos de la factura."
+                        )
+                        try:
+                            answer = ollama_chat(
+                                [
+                                    {"role": "system", "content": error_system},
+                                    {"role": "user", "content": req.message},
+                                ],
+                                temperature=eff_temperature,
+                                model=agent_model,
+                            )
+                            print(f"[FE DEBUG] Llamada de error LLM OK, respuesta: {answer[:200]}")
+                        except Exception as e:
+                            print(f"[FE ERROR] Error en llamada de error LLM: {e}")
+                            answer = cleaned_answer
+                    else:
+                        answer = cleaned_answer
         except Exception as e:
             print(f"[FE ERROR] Error en post-procesamiento FE: {e}")
             import traceback
@@ -1203,6 +1545,11 @@ async def chat(req: ChatRequest, org: OrgContext = Depends(get_current_org)):
     if imap_results:
         imap_summary = format_imap_results_for_history(imap_results)
 
+    # Construir resumen IMAP Facturas para inyectar en el historial
+    imap_facturas_summary = ""
+    if imap_facturas_results:
+        imap_facturas_summary = format_imap_facturas_results_for_history(imap_facturas_results)
+
     # Construir resumen FE para inyectar en el historial
     fe_summary = ""
     if fe_results:
@@ -1240,23 +1587,25 @@ async def chat(req: ChatRequest, org: OrgContext = Depends(get_current_org)):
             lines.append(f"  - {tipo.upper()} → WA: {wa_status} | Email: {em_status}")
         alert_summary = "[RESULTADO DE ALERTAS]\n" + "\n".join(lines) + "\n[/RESULTADO DE ALERTAS]"
 
-    # Guardar mensaje del usuario y respuesta limpia en Redis
-    save_message(req.agent_id, req.session_id, "user", req.message)
-    # Guardar respuesta del asistente con el resumen de emails, gráficos, calendario, cotización y alertas
-    answer_to_save = answer
-    if email_summary:
-        answer_to_save = f"{answer_to_save}\n\n{email_summary}"
-    if imap_summary:
-        answer_to_save = f"{answer_to_save}\n\n{imap_summary}"
-    if calendar_summary:
-        answer_to_save = f"{answer_to_save}\n\n{calendar_summary}"
-    if cotizacion_summary:
-        answer_to_save = f"{answer_to_save}\n\n{cotizacion_summary}"
-    if fe_summary:
-        answer_to_save = f"{answer_to_save}\n\n{fe_summary}"
-    if alert_summary:
-        answer_to_save = f"{answer_to_save}\n\n{alert_summary}"
-    save_message(req.agent_id, req.session_id, "assistant", answer_to_save, charts=charts if charts else None)
+    # Guardar en historial solo si save_history=True (False lo usan reintentos intermedios del meta-agente)
+    if req.save_history:
+        save_message(req.agent_id, req.session_id, "user", req.message)
+        answer_to_save = answer
+        if email_summary:
+            answer_to_save = f"{answer_to_save}\n\n{email_summary}"
+        if imap_summary:
+            answer_to_save = f"{answer_to_save}\n\n{imap_summary}"
+        if imap_facturas_summary:
+            answer_to_save = f"{answer_to_save}\n\n{imap_facturas_summary}"
+        if calendar_summary:
+            answer_to_save = f"{answer_to_save}\n\n{calendar_summary}"
+        if cotizacion_summary:
+            answer_to_save = f"{answer_to_save}\n\n{cotizacion_summary}"
+        if fe_summary:
+            answer_to_save = f"{answer_to_save}\n\n{fe_summary}"
+        if alert_summary:
+            answer_to_save = f"{answer_to_save}\n\n{alert_summary}"
+        save_message(req.agent_id, req.session_id, "assistant", answer_to_save, charts=charts if charts else None)
 
     # Registrar la conversación en SQLite si está habilitado
     if req.use_sql and mcp_client:
@@ -1321,6 +1670,8 @@ async def chat(req: ChatRequest, org: OrgContext = Depends(get_current_org)):
         "calendar_results": calendar_results,
         "imap_executed": imap_executed,
         "imap_results": imap_results,
+        "imap_facturas_executed": imap_facturas_executed,
+        "imap_facturas_summary": imap_facturas_summary,
         "cotizacion_count": len([c for c in cotizacion_actions if "_parse_error" not in c]),
         "fe_executed": fe_executed,
         "fe_results": fe_results,

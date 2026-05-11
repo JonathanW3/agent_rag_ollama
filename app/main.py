@@ -1,14 +1,22 @@
 import os
+import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
 from .agents import create_default_agent
 from .utils.json_sanitize import SanitizeJSONMiddleware
-from .routers import health, agents, chat, sessions, documents, chromadb, ollama, mcp_sqlite, mysql, ibm, autopart, email, orchestrator, supervisor, google_calendar, whatsapp, organizations
+from .cron.scheduler import scheduler, add_licencias_job, add_imap_facturas_job, add_sync_licencias_jobs, add_meta_agent_job
+from .routers import health, agents, chat, sessions, documents, chromadb, ollama, mcp_sqlite, mysql, ibm, autopart, email, orchestrator, supervisor, google_calendar, whatsapp, organizations, sqlserver, cron_licencias, meta_agent, cron_meta_agent
+
+logger = logging.getLogger("main")
 
 
 # Metadata para Swagger UI
 tags_metadata = [
+    {
+        "name": "🗃️ SQL Server Webpospa",
+        "description": "Acceso de solo lectura a la base de datos webpospa en SQL Server. Consulta de licencias registradas por empresa (Ecuador y otros países)."
+    },
     {
         "name": "📅 Google Calendar",
         "description": "Gestión de eventos y reuniones en Google Calendar. Crear, listar, actualizar, eliminar eventos y verificar disponibilidad."
@@ -64,6 +72,10 @@ tags_metadata = [
     {
         "name": "🔧 Ollama",
         "description": "Gestión de modelos de Ollama. Listar, cambiar y descargar modelos LLM."
+    },
+    {
+        "name": "🧠 Meta-Agente",
+        "description": "Coordinador inteligente entre LicenciasEC y CorreosEC. Clasifica la consulta, la delega al agente especializado y reintenta automáticamente si no obtiene datos válidos."
     },
     {
         "name": "🎯 Orquestador",
@@ -149,6 +161,10 @@ app.include_router(google_calendar.router)
 app.include_router(orchestrator.router)
 app.include_router(supervisor.router)
 app.include_router(whatsapp.router)
+app.include_router(sqlserver.router)
+app.include_router(cron_licencias.router)
+app.include_router(cron_meta_agent.router)
+app.include_router(meta_agent.router)
 
 # Crear directorios necesarios
 os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
@@ -162,6 +178,59 @@ async def on_startup():
         create_default_agent()
     except Exception as e:
         print(f"WARNING: No se pudo crear agente por defecto (Redis disponible?): {e}")
+
+    # ── Programar cron de licencias (carga desde DB) ─────────────────────
+    try:
+        from .db_platform import list_cron_licencias, upsert_cron_licencias, migrate_cron_licencias, migrate_licencias_ecuador
+        migrate_cron_licencias()
+        migrate_licencias_ecuador()
+
+        configs = list_cron_licencias(only_active=True)
+
+        # Migración automática: si no hay configs en DB y hay agent_id en env, crear una
+        if not configs and settings.CRON_LICENCIAS_AGENT_ID:
+            logger.info("[CRON] Sin configs en DB — creando desde variables de entorno")
+            cfg = upsert_cron_licencias(
+                agent_id=settings.CRON_LICENCIAS_AGENT_ID,
+                session_id=settings.CRON_LICENCIAS_SESSION_ID,
+                hora=settings.CRON_LICENCIAS_HORA,
+                minuto=settings.CRON_LICENCIAS_MINUTO,
+                timezone=settings.CRON_LICENCIAS_TIMEZONE,
+                dias=settings.CRON_LICENCIAS_DIAS,
+                ttl=settings.CRON_LICENCIAS_TTL,
+                is_active=True,
+            )
+            configs = [cfg]
+
+        for cfg in configs:
+            add_licencias_job(cfg)
+
+        # ── Job de sincronización SQL Server → MySQL (8:00 y 14:00) ─────────
+        try:
+            add_sync_licencias_jobs(timezone=settings.CRON_LICENCIAS_TIMEZONE)
+        except Exception as e:
+            logger.warning(f"[CRON] No se pudo registrar sync_licencias_jobs: {e}")
+
+        # ── Job de sincronización de facturas IMAP ────────────────────────
+        try:
+            add_imap_facturas_job(interval_minutes=30)
+        except Exception as e:
+            logger.warning(f"[CRON] No se pudo registrar job imap_facturas_sync: {e}")
+
+        # ── Jobs del meta-agente (un job por sub-agente configurado) ────────
+        try:
+            from .db_platform import migrate_cron_meta_agent, list_cron_meta_agent
+            migrate_cron_meta_agent()
+            for meta_cfg in list_cron_meta_agent(only_active=True):
+                add_meta_agent_job(meta_cfg)
+            logger.info(f"[CRON] Meta-agente jobs cargados desde DB")
+        except Exception as e:
+            logger.warning(f"[CRON] No se pudieron cargar jobs del meta-agente: {e}")
+
+        scheduler.start()
+        logger.info(f"[CRON] Scheduler iniciado con {len(configs)} job(s) de licencias")
+    except Exception as e:
+        logger.warning(f"[CRON] No se pudo iniciar el scheduler de licencias: {e}")
 
     # Re-registrar webhooks de WhatsApp para todas las organizaciones vinculadas
     try:
@@ -180,3 +249,9 @@ async def on_startup():
                     print(f"[STARTUP] Error re-registrando webhook para '{org_name}': {e}")
     except Exception as e:
         print(f"WARNING: No se pudieron re-registrar webhooks de WhatsApp: {e}")
+
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    if scheduler.running:
+        scheduler.shutdown(wait=False)

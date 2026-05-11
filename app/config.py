@@ -34,6 +34,15 @@ class Settings(BaseModel):
     PLATFORM_DB_DATABASE: str = os.getenv("PLATFORM_DB_DATABASE", "platform_db")
     MASTER_KEY: str = os.getenv("MASTER_KEY", "")  # Clave para endpoints de administración de orgs
 
+    # Cron — chequeo diario de licencias por vencer (SQL Server / webpospa)
+    CRON_LICENCIAS_AGENT_ID: str   = os.getenv("CRON_LICENCIAS_AGENT_ID", "")
+    CRON_LICENCIAS_SESSION_ID: str = os.getenv("CRON_LICENCIAS_SESSION_ID", "licencias_diario")
+    CRON_LICENCIAS_HORA: int       = int(os.getenv("CRON_LICENCIAS_HORA", "8"))
+    CRON_LICENCIAS_MINUTO: int     = int(os.getenv("CRON_LICENCIAS_MINUTO", "0"))
+    CRON_LICENCIAS_DIAS: int       = int(os.getenv("CRON_LICENCIAS_DIAS", "30"))
+    CRON_LICENCIAS_TIMEZONE: str   = os.getenv("CRON_LICENCIAS_TIMEZONE", "America/Guayaquil")
+    CRON_LICENCIAS_TTL: int        = int(os.getenv("CRON_LICENCIAS_TTL", str(86400 * 7)))  # 7 días
+
     class Config:
         validate_assignment = True
 

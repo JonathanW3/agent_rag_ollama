@@ -16,6 +16,7 @@ from ..schemas import (
     WhatsAppWebhookRegister,
     WhatsAppSendRequest,
     ChatRequest,
+    MetaAgentChatRequest,
 )
 from ..agents import get_agent, agent_exists
 from ..whatsapp import (
@@ -29,6 +30,15 @@ from ..whatsapp_client import (
     wa_send_message, wa_send_file, wa_list_contacts, wa_status,
 )
 from .chat import chat as chat_endpoint
+from .meta_agent import meta_agent_chat
+
+_META_AGENT_ID = "meta_agent"
+
+
+def _agent_valid(agent_id: str) -> bool:
+    """Considera 'meta_agent' como un agente virtual siempre válido."""
+    return agent_id == _META_AGENT_ID or agent_exists(agent_id)
+
 
 router = APIRouter(prefix="/whatsapp", tags=["📱 WhatsApp"])
 
@@ -58,8 +68,8 @@ async def link_whatsapp(req: WhatsAppLinkRequest):
     Si se proporciona webhook_base_url, registra automáticamente el webhook
     para recibir mensajes entrantes.
     """
-    # Validar que el agente default existe
-    if not agent_exists(req.default_agent_id):
+    # Validar que el agente default existe (meta_agent es siempre válido)
+    if not _agent_valid(req.default_agent_id):
         raise HTTPException(
             status_code=400,
             detail=f"El agente por defecto '{req.default_agent_id}' no existe"
@@ -224,7 +234,7 @@ async def get_org_whatsapp(organization: str):
 @router.put("/link/{organization}/default-agent", summary="Cambiar agente por defecto")
 async def change_default_agent(organization: str, req: WhatsAppUpdateDefaultAgent):
     """Cambia el agente que atiende números no registrados."""
-    if not agent_exists(req.default_agent_id):
+    if not _agent_valid(req.default_agent_id):
         raise HTTPException(status_code=400, detail=f"El agente '{req.default_agent_id}' no existe")
 
     try:
@@ -345,7 +355,7 @@ async def register_phone_number(organization: str, req: WhatsAppNumberRegister):
     El número se normaliza automáticamente (solo dígitos) para garantizar
     que coincida con el formato de los mensajes entrantes del webhook.
     """
-    if not agent_exists(req.agent_id):
+    if not _agent_valid(req.agent_id):
         raise HTTPException(status_code=400, detail=f"El agente '{req.agent_id}' no existe")
 
     phone = _normalize_phone(req.phone_number)
@@ -366,7 +376,7 @@ async def register_phone_numbers_bulk(organization: str, req: WhatsAppNumberBulk
     errors = []
 
     for entry in req.numbers:
-        if not agent_exists(entry.agent_id):
+        if not _agent_valid(entry.agent_id):
             errors.append({"phone_number": entry.phone_number, "error": f"Agente '{entry.agent_id}' no existe"})
             continue
         phone = _normalize_phone(entry.phone_number)
@@ -438,59 +448,71 @@ async def webhook_receive(wa_session_id: str, request: Request):
 
     # Extraer datos del mensaje entrante
     # Formato típico: {from: "5215512345678@s.whatsapp.net", body: "Hola", ...}
-    # Formato LID:    {from: "186878456262709@lid", name: "@ndres", body: "Hola", ...}
+    # Formato LID:    {from: "186878456262709@lid", number: "593989097816", name: "@ndres", body: "Hola", ...}
     sender_raw = body.get("from", "")
     sender_name = body.get("name", "")
+    sender_number = body.get("number", "")  # Número real pre-resuelto por la API WA
     message_text = body.get("body", "") or body.get("text", "") or body.get("message", "")
 
     if not sender_raw or not message_text:
         return {"status": "ignored", "reason": "Mensaje sin remitente o texto vacío"}
 
-    # Resolver número real del remitente
-    # WhatsApp puede enviar LIDs (Linked IDs) en vez de números telefónicos.
-    # En ese caso, buscamos el contacto por nombre para obtener el número real.
-    sender_phone = _normalize_phone(sender_raw)
+    # Resolver número real del remitente.
+    # Prioridad: 1) campo "number" ya resuelto por la API WA
+    #            2) lookup de contacto por nombre (fallback para LIDs sin "number")
+    #            3) LID normalizado como último recurso
     is_lid = sender_raw.endswith("@lid")
 
-    if is_lid and sender_name:
-        try:
-            result = await wa_list_contacts(wa_session_id, sender_name)
-            contacts = result.get("contacts", []) if isinstance(result, dict) else result
-            for contact in contacts:
-                if contact.get("name") == sender_name and contact.get("number"):
-                    sender_phone = contact["number"]
-                    break
-        except Exception:
-            pass  # Si falla el lookup, continuamos con el LID normalizado
+    if sender_number:
+        sender_phone = _normalize_phone(sender_number)
+    else:
+        sender_phone = _normalize_phone(sender_raw)
+        if is_lid and sender_name:
+            try:
+                result = await wa_list_contacts(wa_session_id, sender_name)
+                contacts = result.get("contacts", []) if isinstance(result, dict) else result
+                for contact in contacts:
+                    if contact.get("name") == sender_name and contact.get("number"):
+                        sender_phone = contact["number"]
+                        break
+            except Exception:
+                pass
 
     # Resolver agente
     organization, agent_id, routing_type = resolve_agent(wa_session_id, sender_phone)
     if not organization:
         return {"status": "ignored", "reason": f"Sesión '{wa_session_id}' no vinculada a ninguna organización"}
 
-    # Verificar que el agente existe
-    agent = get_agent(agent_id)
-    if not agent:
-        agent_id = "default"
-        routing_type = "fallback"
+    # Verificar que el agente existe (meta_agent es virtual, siempre válido)
+    if agent_id != _META_AGENT_ID:
+        agent = get_agent(agent_id)
+        if not agent:
+            agent_id = "default"
+            routing_type = "fallback"
 
     # Construir request de chat usando el número como session_id (mantiene contexto por conversación)
     chat_session_id = f"wa_{sender_phone}"
-    chat_req = ChatRequest(
-        message=message_text,
-        agent_id=agent_id,
-        session_id=chat_session_id,
-    )
 
-    # Ejecutar chat
+    # Ejecutar chat (meta_agent o agente normal)
     try:
-        chat_response = await chat_endpoint(chat_req)
+        if agent_id == _META_AGENT_ID:
+            meta_req = MetaAgentChatRequest(
+                message=message_text,
+                session_id=chat_session_id,
+            )
+            chat_response = await meta_agent_chat(meta_req)
+        else:
+            chat_req = ChatRequest(
+                message=message_text,
+                agent_id=agent_id,
+                session_id=chat_session_id,
+            )
+            chat_response = await chat_endpoint(chat_req)
     except Exception as e:
         import traceback
         print(f"[WEBHOOK ERROR] Agente={agent_id} Sesión={chat_session_id} Mensaje='{message_text[:100]}'")
         print(f"[WEBHOOK ERROR] Excepción: {type(e).__name__}: {e}")
         traceback.print_exc()
-        # Intentar notificar error por WA
         error_msg = "Lo siento, ocurrió un error procesando tu mensaje. Intenta de nuevo."
         try:
             await wa_send_message(wa_session_id, sender_phone, error_msg)

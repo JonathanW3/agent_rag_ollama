@@ -15,7 +15,22 @@ services:
       - CHROMA_PORT=8000
       - USE_CHROMA_SERVER=true
       - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - WHATSAPP_API_URL=http://host.docker.internal:3001
       - MYSQL_HOST=host.docker.internal
+      - PLATFORM_DB_HOST=host.docker.internal
+      - SQLSERVER_HOST=host.docker.internal\SQLEXPRESS
+      - SQLSERVER_DATABASE=webpospa
+      - SQLSERVER_USER=wpfe
+      # SQLSERVER_PASSWORD y SQLSERVER_DRIVER vienen del .env
+      # CRON_LICENCIAS_AGENT_ID viene del .env  (ID del agente a usar para el cron)
+      - CRON_LICENCIAS_HORA=8
+      - CRON_LICENCIAS_MINUTO=0
+      - CRON_LICENCIAS_DIAS=30
+      - CRON_LICENCIAS_TIMEZONE=America/Guayaquil
+      # IMAP Facturas — credenciales en .env (IMAP_SERVER, IMAP_PORT, IMAP_USER, IMAP_PASSWORD, IMAP_USE_SSL)
+      # FEPA Facturación Electrónica — credenciales en .env (FEPA_BASE_URL, FEPA_AMB, FEPA_API_KEY, FEPA_COMPANY_LIC_COD)
+      # WhatsApp webhooks — ajustar PUBLIC_API_URL en .env con la URL pública del servidor
+      - PUBLIC_API_URL=${PUBLIC_API_URL:-http://localhost:8000}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:

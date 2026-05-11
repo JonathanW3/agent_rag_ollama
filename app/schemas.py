@@ -22,6 +22,9 @@ class ChatRequest(BaseModel):
     use_autopart: bool | None = Field(default=None, description="Habilitar consultas MySQL Autopart (None=usar config del agente)")
     use_imap: bool | None = Field(default=None, description="Habilitar lectura de emails por IMAP (None=usar config del agente)")
     use_fe: bool | None = Field(default=None, description="Habilitar Facturación Electrónica FEPA (None=usar config del agente)")
+    use_webpospa: bool | None = Field(default=None, description="Habilitar consultas SQL Server webpospa — licencias Ecuador (None=usar config del agente)")
+    use_imap_facturas: bool | None = Field(default=None, description="Habilitar análisis de facturación IMAP (credenciales desde .env) — CorreosEC (None=usar config del agente)")
+    save_history: bool = Field(default=True, description="Si False, la conversación NO se guarda en el historial de Redis (uso interno del meta-agente en reintentos intermedios)")
 
 
 class AgentCreate(BaseModel):
@@ -55,6 +58,8 @@ class AgentCreate(BaseModel):
     use_ibm: bool = Field(default=False, description="Habilitar consultas MySQL IBM (credit_cards, employees, sales_orders, etc.) por defecto")
     use_autopart: bool = Field(default=False, description="Habilitar consultas MySQL Autopart (vehicles, applications, compatibility, etc.) por defecto")
     use_fe: bool = Field(default=False, description="Habilitar Facturación Electrónica FEPA por defecto para este agente")
+    use_webpospa: bool = Field(default=False, description="Habilitar consultas SQL Server webpospa (licencias Ecuador) por defecto para este agente")
+    use_imap_facturas: bool = Field(default=False, description="Habilitar análisis de facturación IMAP (credenciales desde .env) por defecto — para agente CorreosEC")
     top_k: int = Field(default=4, ge=1, le=100, description="Número de documentos RAG a recuperar por defecto")
     temperature: float = Field(default=0.7, ge=0.0, le=2.0, description="Temperatura del modelo por defecto")
     alert_wa_session_id: str | None = Field(default=None, description="ID de sesión WhatsApp para enviar alertas internas", example="miempresawhts")
@@ -81,6 +86,8 @@ class AgentUpdate(BaseModel):
     imap_config: dict | None = Field(default=None, description="Configuración IMAP para lectura de emails")
     use_imap: bool | None = Field(default=None, description="Habilitar/deshabilitar lectura IMAP para este agente")
     use_fe: bool | None = Field(default=None, description="Habilitar/deshabilitar Facturación Electrónica FEPA para este agente")
+    use_webpospa: bool | None = Field(default=None, description="Habilitar/deshabilitar consultas SQL Server webpospa para este agente")
+    use_imap_facturas: bool | None = Field(default=None, description="Habilitar/deshabilitar análisis de facturación IMAP para este agente")
     top_k: int | None = Field(default=None, ge=1, le=100, description="Número de documentos RAG a recuperar por defecto")
     temperature: float | None = Field(default=None, ge=0.0, le=2.0, description="Temperatura del modelo por defecto")
     alert_wa_session_id: str | None = Field(default=None, description="ID de sesión WhatsApp para alertas internas")
@@ -148,6 +155,12 @@ class AutopartQueryRequest(BaseModel):
     """Modelo para consultas a la base de datos Autopart."""
     query: str = Field(..., description="Consulta SELECT a ejecutar", example="SELECT * FROM vehicles LIMIT 5")
     params: list = Field(default=[], description="Parámetros para placeholders %s")
+
+
+class SqlServerQueryRequest(BaseModel):
+    """Modelo para consultas a la base de datos webpospa (SQL Server)."""
+    query: str = Field(..., description="Consulta SELECT a ejecutar", example="SELECT TOP 5 * FROM [webpospa].[dbo].[RegisteredLicenses]")
+    params: list = Field(default=[], description="Parámetros para placeholders ?")
 
 
 class OrchestratorChatRequest(BaseModel):
@@ -287,6 +300,22 @@ class WhatsAppSendRequest(BaseModel):
     organization: str = Field(..., description="Organización (para resolver la sesión WA)", example="MiEmpresa")
     to: str = Field(..., description="Número destino (formato internacional sin +)", example="5215512345678")
     text: str = Field(..., description="Texto del mensaje", example="Hola, ¿en qué puedo ayudarte?")
+
+
+class MetaAgentChatRequest(BaseModel):
+    """Solicitud al meta-agente coordinador (LicenciasEC / CorreosEC)."""
+    message: str = Field(..., description="Mensaje del usuario", example="¿Cuántas licencias tiene la empresa XYZ?")
+    session_id: str = Field(default="default", description="ID de sesión para mantener contexto", example="user123")
+    use_rag: bool | None = Field(default=None, description="Usar RAG (None=usar config del agente elegido)")
+
+
+class MetaAgentConfigRequest(BaseModel):
+    """Configuración del meta-agente coordinador."""
+    licencias_agent_id: str = Field(..., description="ID del agente de licencias", example="LicenciasEC")
+    correos_agent_id: str = Field(..., description="ID del agente de correos/facturas", example="CorreosEC")
+    llm_model: str | None = Field(default=None, description="Modelo LLM para clasificación y validación (None=usa el global)", example="llama3.1")
+    max_retries: int = Field(default=3, ge=1, le=10, description="Reintentos máximos cuando el agente no retorna datos válidos")
+    system_prompt: str | None = Field(default=None, description="Prompt del coordinador — define su rol al reformular consultas y generar mensajes de cierre")
 
 
 class SupervisorConfigUpdate(BaseModel):

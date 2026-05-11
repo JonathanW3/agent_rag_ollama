@@ -27,6 +27,11 @@ chroma_data/
 
 # Environment
 .env
+.env.*
+!.env.example
+
+# Claude Code local settings (may contain tokens or personal config)
+.claude/settings.local.json
 
 # Credentials
 mcp_google_calendar/credentials/
